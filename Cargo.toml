@@ -7,10 +7,13 @@ edition = "2021"
 
 [dependencies]
 
-# crypto deps
+# crypto dependencies
+
 sha2 = "0.10.7"
 aes-gcm = "0.10.3"
 pbkdf2 = "0.12.2"
 rand = "0.8.5"
-
+# DB orm
+# pwd-rs used diesel which i didn't really like, trying rusqlite
+# 
 rusqlite = { version = "0.29.0", features = ["bundled"] }
