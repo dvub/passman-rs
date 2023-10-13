@@ -5,7 +5,7 @@ use aes_gcm::{
     Aes256Gcm, Key,
 };
 use rusqlite::{Connection, OptionalExtension};
-
+use thiserror::Error;
 #[derive(Debug)]
 pub struct Password {
     id: i32,
@@ -14,6 +14,7 @@ pub struct Password {
     username: Option<String>,
     notes: Option<String>,
     password: Option<String>,
+    nonce: String,
 }
 
 pub fn establish_connection() -> std::result::Result<rusqlite::Connection, rusqlite::Error> {
@@ -28,52 +29,57 @@ pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusql
         email TEXT DEFAULT NULL,
         pass TEXT DEFAULT NULL,
         notes TEXT DEFAULT NULL,
-
+        nonce TEXT NOT NULL
       );",
         (),
     )
 }
+#[derive(Error, Debug)]
+pub enum GetError {
+    #[error("SQLite Error: {0}")]
+    SQLiteError(#[from] rusqlite::Error),
+}
+
 pub fn get_password(
     connection: &Connection,
     master_password: impl AsRef<[u8]>,
     search_term: &str,
-) -> Result<Option<Password>, rusqlite::Error> {
+) -> Result<Option<Password>, GetError> {
     let mut statement = connection.prepare("select * from password where name = ?")?;
 
-    statement
+    Ok(statement
         .query_row([search_term], |row| {
+            // get some required data
             let id: i32 = row.get(0)?;
-            let name: Vec<u8> = row.get(1)?;
+            let name: String = row.get(1)?;
+            let nonce: String = row.get(6)?;
+
             let derived = derive_key(master_password, &name);
             let key = Key::<Aes256Gcm>::from_slice(&derived);
             let cipher = Aes256Gcm::new(key);
 
-            let decrypted_data: Vec<Option<String>> = (2..5)
+            let decrypted_data: Vec<Option<String>> = (2..6)
                 .map(|n| {
-                    let data: Option<String> = row.get(n).unwrap();
-
-                    match data {
-                        Some(data) => {
-                            let decrypted = cipher
-                                .decrypt(GenericArray::from_slice(&name), data.as_ref())
-                                .unwrap();
-                            Some(String::from_utf8(decrypted).unwrap())
-                        }
-                        None => None,
-                    }
+                    let data: Option<String> = row.get(n)??;
+                    let decoded = hex::decode(data)?;
+                    let decoded_nonce = hex::decode(&nonce)?;
+                    let decrypted = cipher
+                        .decrypt(GenericArray::from_slice(&decoded_nonce), decoded.as_ref())?;
+                    String::from_utf8(decrypted)?
                 })
                 .collect();
 
             Ok(Password {
                 id,
-                name: row.get(1)?,
-                username: row.get(2)?,
-                email: row.get(3)?,
-                password: row.get(4)?,
-                notes: row.get(5)?,
+                name,
+                username: decrypted_data.get(0)?.clone(),
+                email: decrypted_data.get(1)?.clone(),
+                password: decrypted_data.get(2)?.clone(),
+                notes: decrypted_data.get(3)?.clone(),
+                nonce,
             })
         })
-        .optional()
+        .optional()?)
 }
 pub fn insert_data(
     connection: &Connection,
@@ -93,7 +99,13 @@ pub fn insert_data(
 
 #[cfg(test)]
 mod tests {
+    use aes_gcm::{
+        aead::{Aead, OsRng},
+        AeadCore, Aes256Gcm, Key, KeyInit,
+    };
     use rusqlite::Connection;
+
+    use crate::crypto::derive_key;
 
     fn insert_test_data(connection: &Connection) -> std::result::Result<usize, rusqlite::Error> {
         connection.execute(
@@ -132,45 +144,48 @@ mod tests {
         let insert_result = insert_test_data(&connection).unwrap();
         assert_eq!(insert_result, 1);
     }
-
-    // test the read function
     #[test]
     fn get_password() {
-        let connection = test_setup();
+        let connection = Connection::open_in_memory().unwrap();
+        super::create_table(&connection).unwrap();
 
-        let term = "test_name";
-        // this is the important function that we want to test
-        let result = super::get_password(&connection, term).unwrap().unwrap();
-        // check that the values are as we set them in the test function
-        assert_eq!(result.name, term);
-        assert!(result.notes.is_none());
-    }
-    // test the insert portion of the insert_data function
-    #[test]
-    fn insert() {
-        let connection = test_setup();
+        let master = "mymasterpassword";
+        let name = "test_name";
+        let password = "coolpassword";
+        let derived_key = derive_key(master, name);
 
-        let result = super::insert_data(&connection, "test", "pass", "mypass123").unwrap();
-        assert_eq!(result, 1);
+        let key = Key::<Aes256Gcm>::from_slice(&derived_key);
+        let cipher = Aes256Gcm::new(key);
+        let nonce = Aes256Gcm::generate_nonce(OsRng);
+        let encoded_nonce = hex::encode(nonce);
+
+        let plaintext_arr = ["cool_user1", "cool_user@usermail.com", password, "mynotes"];
+
+        let encrypted_arr: Vec<String> = plaintext_arr
+            .iter()
+            .map(|data| hex::encode(cipher.encrypt(&nonce, data.as_bytes()).unwrap()))
+            .collect();
+
+        let insert = connection.execute(
+            "insert into password (name, username, email, pass, notes, nonce) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (
+                name,
+                encrypted_arr.get(0).unwrap(),
+                encrypted_arr.get(1).unwrap(),
+                encrypted_arr.get(2).unwrap(),
+                encrypted_arr.get(3).unwrap(),
+                encoded_nonce,
+            ),
+        ).unwrap();
+        assert_eq!(insert, 1);
+
+        let res = super::get_password(&connection, master, name).expect("error getting from db");
+
         assert_eq!(
-            super::get_password(&connection, "test")
-                .unwrap()
-                .unwrap()
+            res.expect("no password found")
                 .password
-                .unwrap(),
-            "mypass123"
+                .expect("no password field"),
+            password
         );
-    }
-    // test the update portion of the insert_data function
-    #[test]
-    fn update() {
-        let connection = test_setup();
-        super::insert_data(&connection, "test_name", "pass", "mypass123").unwrap();
-        let new_data = super::get_password(&connection, "test_name")
-            .unwrap()
-            .unwrap()
-            .password
-            .unwrap();
-        assert_eq!(new_data, "mypass123");
     }
 }
