@@ -1,11 +1,13 @@
+use std::f32::consts::E;
+
 use crate::crypto::*;
 
 use aes_gcm::{
     aead::{generic_array::GenericArray, Aead, KeyInit},
     Aes256Gcm, Key,
 };
+use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use thiserror::Error;
 #[derive(Debug)]
 pub struct Password {
     id: i32,
@@ -34,22 +36,17 @@ pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusql
         (),
     )
 }
-#[derive(Error, Debug)]
-pub enum GetError {
-    #[error("SQLite Error: {0}")]
-    SQLiteError(#[from] rusqlite::Error),
-}
 
 pub fn get_password(
     connection: &Connection,
     master_password: impl AsRef<[u8]>,
     search_term: &str,
-) -> Result<Option<Password>, GetError> {
+) -> anyhow::Result<Option<Password>> {
     let mut statement = connection.prepare("select * from password where name = ?")?;
 
     Ok(statement
         .query_row([search_term], |row| {
-            // get some required data
+            // Get required data
             let id: i32 = row.get(0)?;
             let name: String = row.get(1)?;
             let nonce: String = row.get(6)?;
@@ -58,24 +55,32 @@ pub fn get_password(
             let key = Key::<Aes256Gcm>::from_slice(&derived);
             let cipher = Aes256Gcm::new(key);
 
-            let decrypted_data: Vec<Option<String>> = (2..6)
+            let decrypted_data: Vec<Option<anyhow::Result<String>>> = (2..6)
                 .map(|n| {
-                    let data: Option<String> = row.get(n)??;
-                    let decoded = hex::decode(data)?;
-                    let decoded_nonce = hex::decode(&nonce)?;
-                    let decrypted = cipher
-                        .decrypt(GenericArray::from_slice(&decoded_nonce), decoded.as_ref())?;
-                    String::from_utf8(decrypted)?
+                    let data: Option<String> = row.get::<usize, Option<String>>(n)?;
+                    match data {
+                        Some(x) => {
+                            let decoded = hex::decode(x)?;
+                            let decoded_nonce = hex::decode(&nonce)?;
+
+                            let decrypted = cipher
+                                .decrypt(GenericArray::from_slice(&decoded_nonce), decoded.as_ref())
+                                .unwrap();
+
+                            Some(String::from_utf8(decrypted)?)
+                        }
+                        None => None,
+                    }
                 })
                 .collect();
 
             Ok(Password {
                 id,
                 name,
-                username: decrypted_data.get(0)?.clone(),
-                email: decrypted_data.get(1)?.clone(),
-                password: decrypted_data.get(2)?.clone(),
-                notes: decrypted_data.get(3)?.clone(),
+                username: decrypted_data[0]?,
+                email: decrypted_data.get(1).unwrap().unwrap().clone(),
+                password: decrypted_data.get(2).unwrap().unwrap().clone(),
+                notes: decrypted_data.get(3).unwrap().unwrap().clone(),
                 nonce,
             })
         })
