@@ -13,10 +13,12 @@ sha2 = "0.10.7"
 aes-gcm = "0.10.3"
 pbkdf2 = "0.12.2"
 rand = "0.8.5"
-
-
 hex = "0.4.3"
-anyhow = "1.0.75"
+
+# error handling and propagation
+
+anyhow = "1.0"
+thiserror = "1.0"
 # DB orm
 # pwd-rs used diesel which i didn't really like, trying rusqlite
 # 
