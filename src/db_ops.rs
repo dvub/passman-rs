@@ -39,6 +39,68 @@ pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusql
 
 pub fn get_password(
     connection: &Connection,
+    search_term: &str,
+) -> Result<Option<Password>, rusqlite::Error> {
+    let mut stmt = connection.prepare("select * from password where name = ?")?;
+    stmt.query_row([search_term], |row| {
+        Ok(Password {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            email: row.get(2)?,
+            username: row.get(3)?,
+            password: row.get(4)?,
+            notes: row.get(5)?,
+            nonce: row.get(6)?,
+        })
+    }).optional()       
+}
+
+pub fn decrypt_password(password: Password, master: &str) -> anyhow::Result<Password> {
+    
+    let id = password.id;
+    let name = password.name;
+    let nonce = password.nonce;
+    let fields = [password.email, password.username, password.password, password.notes];
+
+    let derived = derive_key(master, &name);
+    let key = Key::<Aes256Gcm>::from_slice(&derived);
+    let cipher = Aes256Gcm::new(key);
+
+    let decoded_nonce = hex::decode(&nonce)?;
+
+    let decrypted_data: [anyhow::Result<Option<String>>; 4] = fields.map(|field| {
+        match field {
+            Some(data) => {
+                let decoded = hex::decode(data)?;
+                let decrypted = cipher
+                .decrypt(GenericArray::from_slice(&decoded_nonce), decoded.as_ref()).unwrap();
+        
+                anyhow::Ok(Some(String::from_utf8(decrypted)?))
+            }
+            None => anyhow::Ok(None)
+        }
+    });
+
+    let email = decrypted_data[0]?;
+    let username = (*decrypted_data.get(1).unwrap())?;
+    let password = (*decrypted_data.get(2).unwrap())?;
+    let notes = (*decrypted_data.get(3).unwrap())?;
+
+    Ok(Password {
+        id,
+        name,
+        email: email.clone(),
+        username,
+        notes,
+        password,
+        nonce
+    })
+}
+
+
+/* 
+pub fn get_password(
+    connection: &Connection,
     master_password: impl AsRef<[u8]>,
     search_term: &str,
 ) -> anyhow::Result<Option<Password>> {
@@ -86,6 +148,8 @@ pub fn get_password(
         })
         .optional()?)
 }
+
+*/
 pub fn insert_data(
     connection: &Connection,
     password_name: &str,
@@ -184,7 +248,7 @@ mod tests {
         ).unwrap();
         assert_eq!(insert, 1);
 
-        let res = super::get_password(&connection, master, name).expect("error getting from db");
+        let res = super::get_password(&connection, name).expect("error getting from db");
 
         assert_eq!(
             res.expect("no password found")
