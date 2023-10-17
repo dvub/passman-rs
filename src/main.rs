@@ -1,3 +1,5 @@
+use std::process;
+
 use cliclack::{input, log, multiselect, password, select};
 
 use crate::db_ops::*;
@@ -7,16 +9,43 @@ mod db_ops;
 mod error;
 mod password;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     use cliclack::{intro, outro};
 
-    let connection = establish_connection().unwrap();
-    create_table(&connection).unwrap();
+    intro("passman")?;
 
-    intro("passman").unwrap();
-    if !check_master(&connection).unwrap() {
-        log::error("master does not exist!").unwrap();
-        return;
+    log::info("Connecting to SQLite database...")?;
+
+    let connection = establish_connection().unwrap_or_else(|e| {
+        eprintln!("There was an error: {}", e);
+        process::exit(1);
+    });
+    log::success("Connected to SQLite database!")?;
+
+    log::info("Creating SQLite table if it doesn't exist")?;
+    create_table(&connection).unwrap_or_else(|e| {
+        eprintln!("There was an error: {}", e);
+        std::process::exit(1);
+    });
+
+    log::success("Found database table!")?;
+
+    let master_exists = check_master(&connection).unwrap_or_else(|e| {
+        eprintln!("There was an error: {}", e);
+        std::process::exit(1);
+    });
+    if !master_exists {
+        log::error("master does not exist!")?;
+        let mut new_master = "".to_string();
+        let mut confirm = "".to_string();
+        while new_master != confirm {
+            new_master = password("Provide a new master password")
+                .mask('*')
+                .interact()?;
+            confirm = password("Confirm new master password")
+                .mask('*')
+                .interact()?;
+        }
     }
 
     let master = password("Provide a master password")
@@ -40,4 +69,6 @@ fn main() {
     }
 
     outro("You're all set!").unwrap();
+
+    Ok(())
 }
