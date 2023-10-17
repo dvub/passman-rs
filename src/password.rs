@@ -13,16 +13,4 @@ pub struct Password {
     pub notes: Option<String>,
     /// Optional password field.
     pub password: Option<String>,
-
-    pub username_nonce: Option<String>,
-    pub email_nonce: Option<String>,
-    pub password_nonce: Option<String>,
-    pub notes_nonce: Option<String>,
-}
-
-pub enum PasswordColumn {
-    Email,
-    Username,
-    Password,
-    Notes,
 }

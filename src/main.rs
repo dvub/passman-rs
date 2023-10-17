@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
     });
     log::success("Connected to SQLite database!")?;
 
-    log::info("Creating SQLite table if it doesn't exist")?;
+    log::info("Querying Table")?;
     create_table(&connection).unwrap_or_else(|e| {
         eprintln!("There was an error: {}", e);
         std::process::exit(1);

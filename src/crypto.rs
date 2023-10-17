@@ -1,32 +1,22 @@
 use aes_gcm::{
-    aead::{
-        consts::{B0, B1},
-        generic_array::GenericArray,
-        Aead, OsRng,
-    },
+    aead::{generic_array::GenericArray, Aead, OsRng},
     aes::Aes256,
     Aes256Gcm, AesGcm, Key, KeyInit,
 };
 
 use pbkdf2::pbkdf2_hmac;
 use rand::Rng;
-use sha2::{
-    Digest, Sha256,
-};
+use sha2::{Digest, Sha256};
 use typenum::consts::{U12, U32};
 
 use crate::error::GetPasswordError;
-
-
 
 /// Hashes `text` using `Sha256`.
 ///
 /// # Arguments
 ///
 /// - `text` - a reference to a `[u8]` to hash.
-pub fn hash(
-    text: &[u8],
-) -> GenericArray<u8, U32> {
+pub fn hash(text: &[u8]) -> GenericArray<u8, U32> {
     let mut hasher = Sha256::new();
     hasher.update(text);
     hasher.finalize()
@@ -60,9 +50,8 @@ pub fn decrypt_password_field(
     nonce: impl AsRef<[u8]>,
     cipher: &AesGcm<Aes256, U12>,
 ) -> Result<String, GetPasswordError> {
-    let decoded = hex::decode(data)?;
     let decrypted = cipher
-        .decrypt(GenericArray::from_slice(nonce.as_ref()), decoded.as_ref())
+        .decrypt(GenericArray::from_slice(nonce.as_ref()), data.as_ref())
         .map_err(GetPasswordError::AesGcm)?;
     Ok(String::from_utf8(decrypted)?)
 }
@@ -77,12 +66,15 @@ pub fn encrypt_password_field(
     data: impl AsRef<[u8]>,
     nonce: &aes_gcm::Nonce<U12>,
     cipher: &AesGcm<Aes256, U12>,
-) -> Result<String, aes_gcm::Error> {
+) -> Result<Vec<u8>, aes_gcm::Error> {
     let encrypted = cipher.encrypt(nonce, data.as_ref())?;
-    Ok(hex::encode(encrypted))
+    Ok(encrypted)
 }
 
-pub fn gen_cipher(master: impl AsRef<[u8]>, password_name: impl AsRef<[u8]>) -> AesGcm<Aes256, U12> {
+pub fn gen_cipher(
+    master: impl AsRef<[u8]>,
+    password_name: impl AsRef<[u8]>,
+) -> AesGcm<Aes256, U12> {
     let derived = derive_key(master, password_name);
     let key = Key::<Aes256Gcm>::from_slice(&derived);
     Aes256Gcm::new(key)
@@ -127,10 +119,10 @@ mod tests {
         let key = Key::<Aes256Gcm>::from_slice(&key);
         let cipher = Aes256Gcm::new(key);
 
-        let ciphertext = hex::encode(cipher.encrypt(&nonce, b"data".as_ref()).unwrap());
+        let ciphertext = cipher.encrypt(&nonce, b"data".as_ref()).unwrap();
 
         // here's the function we're testing
-        let result = super::decrypt_password_field(&ciphertext, &nonce, &cipher).unwrap();
+        let result = super::decrypt_password_field(ciphertext, nonce, &cipher).unwrap();
 
         assert_eq!(result, "data");
     }
@@ -150,7 +142,6 @@ mod tests {
         // encrypt and compare!
         let ciphertext = cipher.encrypt(&nonce, b"data".as_ref()).unwrap();
 
-        assert_eq!(res.unwrap(), hex::encode(ciphertext));
+        assert_eq!(res.unwrap(), ciphertext);
     }
-    
 }

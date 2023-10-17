@@ -1,13 +1,7 @@
-use std::result;
-
-use crate::{
-    crypto::*,
-    error::*,
-    password::{Password, PasswordColumn},
-};
+use crate::{crypto::*, error::*, password::Password};
 use aes_gcm::{
-    aead::{KeyInit, OsRng},
-    AeadCore, Aes256Gcm, Key,
+    aead::{generic_array::GenericArray, Aead, OsRng},
+    AeadCore, Aes256Gcm,
 };
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
@@ -28,13 +22,7 @@ pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusql
         username TEXT DEFAULT NULL,
         email TEXT DEFAULT NULL,
         pass TEXT DEFAULT NULL,
-        notes TEXT DEFAULT NULL,
-
-        username_nonce TEXT DEFAULT NULL,
-        email_nonce TEXT DEFAULT NULL,
-        pass_nonce TEXT DEFAULT NULL,
-        notes_nonce TEXT DEFAULT NULL
-
+        notes TEXT DEFAULT NULL
       );",
         (),
     )
@@ -61,11 +49,6 @@ fn get_password(
             username: row.get(3)?,
             password: row.get(4)?,
             notes: row.get(5)?,
-
-            email_nonce: row.get(6)?,
-            username_nonce: row.get(7)?,
-            password_nonce: row.get(8)?,
-            notes_nonce: row.get(9)?,
         })
     })
     .optional()
@@ -84,10 +67,6 @@ fn decrypt_password(password: Password, master: &str) -> Result<Password, GetPas
     let Password {
         id,
         name,
-        email_nonce,
-        username_nonce,
-        password_nonce,
-        notes_nonce,
         .. // and the rest
     } = password;
 
@@ -101,10 +80,12 @@ fn decrypt_password(password: Password, master: &str) -> Result<Password, GetPas
         field
             .map(|data| {
                 let decoded_data = hex::decode(data)?;
-                let resulted_nonce = decoded_data.get(0..=12);
-                let nonce = resulted_nonce.ok_or_else(|| GetPasswordError::NoMatchingNonce)?;
+                if decoded_data.len() < 12 {}
+                let nonce = decoded_data
+                    .get(..12)
+                    .ok_or_else(|| GetPasswordError::NoMatchingNonce)?;
                 let ciphertext = decoded_data.get(12..).unwrap();
-                decrypt_password_field(&ciphertext, &nonce, &cipher)
+                decrypt_password_field(ciphertext, nonce, &cipher)
             })
             .transpose() // transpose switches "...the Option of a Result to a Result of an Option." ... that is so cool!!
     };
@@ -121,10 +102,6 @@ fn decrypt_password(password: Password, master: &str) -> Result<Password, GetPas
         username,
         notes,
         password: pass,
-        username_nonce,
-        email_nonce,
-        password_nonce,
-        notes_nonce,
     })
 }
 /// Reads and decrypts a password from the SQLite database.
@@ -164,35 +141,23 @@ pub fn insert_data(
     connection: &Connection,
     password_name: &str,
     master: &str,
-    column_name: PasswordColumn,
+    column_name: &str,
     data: &str,
 ) -> std::result::Result<usize, InsertEncryptedFieldError> {
-    let column_name = match column_name {
-        PasswordColumn::Email => "email",
-        PasswordColumn::Username => "username",
-        PasswordColumn::Notes => "notes",
-        PasswordColumn::Password => "pass",
-    };
     let cipher = gen_cipher(master, password_name);
-    let nonce = Aes256Gcm::generate_nonce(OsRng);
+    let nonce: GenericArray<u8, typenum::U12> = Aes256Gcm::generate_nonce(OsRng);
+    let mut n = nonce.to_vec();
 
-    let encoded_nonce = hex::encode(nonce);
-    let mut ciphertext = encoded_nonce.clone();
+    let mut encrypted = cipher.encrypt(&nonce, data.as_bytes()).unwrap();
+    n.append(&mut encrypted);
 
-    let encrypted_data =
-        encrypt_password_field(data, &nonce, &cipher).map_err(InsertEncryptedFieldError::AesGcm)?;
-        
-    ciphertext.push_str(&encrypted_data);
+    let ciphertext = hex::encode(n);
 
-    let params = [
-        password_name,
-        ciphertext.as_str(),
-        encoded_nonce.as_str(),
-    ];
+    let params = [password_name, ciphertext.as_str()];
     Ok(connection.execute(
         format!(
-            "insert into password(name, {}, {}_nonce) values (?1, ?2, ?3) on conflict(name) do update set {} = ?3 ",
-            column_name, column_name, column_name
+            "insert into password(name, {}) values (?1, ?2) on conflict(name) do update set {} = ?2 ",
+            column_name, column_name
         )
         .as_str(),
         params,
@@ -209,25 +174,17 @@ pub fn check_master(connection: &Connection) -> Result<bool, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::MASTER_KEYWORD;
-    use crate::crypto::{derive_key, gen_cipher};
+    use crate::crypto::derive_key;
     use aes_gcm::{
-        aead::{Aead, OsRng, generic_array::GenericArray},
+        aead::{generic_array::GenericArray, Aead, OsRng},
         AeadCore, Aes256Gcm, Key, KeyInit,
     };
     use rusqlite::Connection;
 
     fn insert_test_data(connection: &Connection) -> std::result::Result<usize, rusqlite::Error> {
         connection.execute(
-            "insert into password (name, username, email, pass, username_nonce, email_nonce, pass_nonce) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            (
-                "test_name",
-                "cool_user1",
-                "cool_user@usermail.com",
-                "12345",
-                "nonce42",
-                "nonce42",
-                "nonce42",
-            ),
+            "insert into password (name, username, email, pass) VALUES (?1, ?2, ?3, ?4)",
+            ("test_name", "cool_user1", "cool_user@usermail.com", "12345"),
         )
     }
 
@@ -256,23 +213,22 @@ mod tests {
         let master = "mymasterpassword";
         let name = "test_name";
         let password = "coolpassword";
-        let cipher = gen_cipher(master, name);
+        let derived = derive_key(master, name);
+        let key = Key::<Aes256Gcm>::from_slice(&derived);
+        let cipher = Aes256Gcm::new(key);
+
         let nonce: GenericArray<u8, typenum::U12> = Aes256Gcm::generate_nonce(OsRng);
-        let encoded_nonce = hex::encode(nonce);
-
-        
-       
-        let mut encrypted = cipher.encrypt(&nonce, password.as_bytes()).unwrap();
-
         let mut n = nonce.to_vec();
-        n.append(&mut encrypted);
-        let ciphertext = hex::encode(nonce);
 
+        let mut encrypted = cipher.encrypt(&nonce, password.as_bytes()).unwrap();
+        n.append(&mut encrypted);
+
+        let ciphertext = hex::encode(n);
 
         let insert = connection
             .execute(
-                "insert into password (name, pass, pass_nonce) VALUES (?1, ?2, ?3)",
-                (name, ciphertext, encoded_nonce),
+                "insert into password (name, pass) VALUES (?1, ?2)",
+                (name, ciphertext),
             )
             .unwrap();
         assert_eq!(insert, 1);
@@ -288,7 +244,6 @@ mod tests {
     }
     #[test]
     fn insert_data() {
-        use super::PasswordColumn;
         let connection = Connection::open_in_memory().unwrap();
         super::create_table(&connection).unwrap();
 
@@ -296,14 +251,7 @@ mod tests {
         let name = "test_name";
         let password = "coolpassword";
 
-        super::insert_data(
-            &connection,
-            name,
-            master,
-            PasswordColumn::Password,
-            password,
-        )
-        .unwrap();
+        super::insert_data(&connection, name, master, "pass", password).unwrap();
 
         let r = super::read_password(&connection, name, master)
             .unwrap()
