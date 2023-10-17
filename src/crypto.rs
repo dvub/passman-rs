@@ -7,17 +7,17 @@ use aes_gcm::{
     aes::Aes256,
     Aes256Gcm, AesGcm, Key, KeyInit,
 };
+
 use pbkdf2::pbkdf2_hmac;
 use rand::Rng;
 use sha2::{
-    digest::typenum::{UInt, UTerm},
     Digest, Sha256,
 };
+use typenum::consts::{U12, U32};
 
 use crate::error::GetPasswordError;
 
-pub type Nonce = GenericArray<u8, UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>>;
-pub type Cipher = AesGcm<Aes256, UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>>;
+
 
 /// Hashes `text` using `Sha256`.
 ///
@@ -26,7 +26,7 @@ pub type Cipher = AesGcm<Aes256, UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>>;
 /// - `text` - a reference to a `[u8]` to hash.
 pub fn hash(
     text: &[u8],
-) -> GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>> {
+) -> GenericArray<u8, U32> {
     let mut hasher = Sha256::new();
     hasher.update(text);
     hasher.finalize()
@@ -58,7 +58,7 @@ pub fn derive_key(master_password: impl AsRef<[u8]>, password: impl AsRef<[u8]>)
 pub fn decrypt_password_field(
     data: impl AsRef<[u8]>,
     nonce: impl AsRef<[u8]>,
-    cipher: &Cipher,
+    cipher: &AesGcm<Aes256, U12>,
 ) -> Result<String, GetPasswordError> {
     let decoded = hex::decode(data)?;
     let decrypted = cipher
@@ -75,14 +75,14 @@ pub fn decrypt_password_field(
 ///
 pub fn encrypt_password_field(
     data: impl AsRef<[u8]>,
-    nonce: &Nonce,
-    cipher: &Cipher,
+    nonce: &aes_gcm::Nonce<U12>,
+    cipher: &AesGcm<Aes256, U12>,
 ) -> Result<String, aes_gcm::Error> {
     let encrypted = cipher.encrypt(nonce, data.as_ref())?;
     Ok(hex::encode(encrypted))
 }
 
-pub fn gen_cipher(master: impl AsRef<[u8]>, password_name: impl AsRef<[u8]>) -> Cipher {
+pub fn gen_cipher(master: impl AsRef<[u8]>, password_name: impl AsRef<[u8]>) -> AesGcm<Aes256, U12> {
     let derived = derive_key(master, password_name);
     let key = Key::<Aes256Gcm>::from_slice(&derived);
     Aes256Gcm::new(key)
@@ -152,4 +152,5 @@ mod tests {
 
         assert_eq!(res.unwrap(), hex::encode(ciphertext));
     }
+    
 }

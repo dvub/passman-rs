@@ -341,6 +341,7 @@ dependencies = [
  "rusqlite",
  "sha2",
  "thiserror",
+ "typenum",
 ]
 
 [[package]]

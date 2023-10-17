@@ -1,3 +1,5 @@
+use std::result;
+
 use crate::{
     crypto::*,
     error::*,
@@ -95,24 +97,22 @@ fn decrypt_password(password: Password, master: &str) -> Result<Password, GetPas
 
     // thank you @seaish for this fucking awesome function
     // ithis is so cool
-    let f = |field: Option<String>, nonce: &Option<String>| {
+    let f = |field: Option<String>| {
         field
             .map(|data| {
-                let resulted_nonce = nonce
-                    .as_ref()
-                    .ok_or_else(|| GetPasswordError::NoMatchingNonce)?;
-
-                let decoded_nonce = hex::decode(resulted_nonce)?;
-
-                decrypt_password_field(&data, &decoded_nonce, &cipher)
+                let decoded_data = hex::decode(data)?;
+                let resulted_nonce = decoded_data.get(0..=12);
+                let nonce = resulted_nonce.ok_or_else(|| GetPasswordError::NoMatchingNonce)?;
+                let ciphertext = decoded_data.get(12..).unwrap();
+                decrypt_password_field(&ciphertext, &nonce, &cipher)
             })
             .transpose() // transpose switches "...the Option of a Result to a Result of an Option." ... that is so cool!!
     };
 
-    let email = f(password.email, &email_nonce)?;
-    let username = f(password.username, &username_nonce)?;
-    let pass = f(password.password, &password_nonce)?;
-    let notes = f(password.notes, &notes_nonce)?;
+    let email = f(password.email)?;
+    let username = f(password.username)?;
+    let pass = f(password.password)?;
+    let notes = f(password.notes)?;
 
     Ok(Password {
         id,
@@ -174,16 +174,19 @@ pub fn insert_data(
         PasswordColumn::Password => "pass",
     };
     let cipher = gen_cipher(master, password_name);
-
     let nonce = Aes256Gcm::generate_nonce(OsRng);
+
     let encoded_nonce = hex::encode(nonce);
+    let mut ciphertext = encoded_nonce.clone();
 
     let encrypted_data =
         encrypt_password_field(data, &nonce, &cipher).map_err(InsertEncryptedFieldError::AesGcm)?;
+        
+    ciphertext.push_str(&encrypted_data);
 
     let params = [
         password_name,
-        encrypted_data.as_str(),
+        ciphertext.as_str(),
         encoded_nonce.as_str(),
     ];
     Ok(connection.execute(
@@ -206,9 +209,9 @@ pub fn check_master(connection: &Connection) -> Result<bool, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::MASTER_KEYWORD;
-    use crate::crypto::derive_key;
+    use crate::crypto::{derive_key, gen_cipher};
     use aes_gcm::{
-        aead::{Aead, OsRng},
+        aead::{Aead, OsRng, generic_array::GenericArray},
         AeadCore, Aes256Gcm, Key, KeyInit,
     };
     use rusqlite::Connection;
@@ -253,18 +256,23 @@ mod tests {
         let master = "mymasterpassword";
         let name = "test_name";
         let password = "coolpassword";
-        let derived_key = derive_key(master, name);
-
-        let key = Key::<Aes256Gcm>::from_slice(&derived_key);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Aes256Gcm::generate_nonce(OsRng);
+        let cipher = gen_cipher(master, name);
+        let nonce: GenericArray<u8, typenum::U12> = Aes256Gcm::generate_nonce(OsRng);
         let encoded_nonce = hex::encode(nonce);
 
-        let encrypted = hex::encode(cipher.encrypt(&nonce, password.as_bytes()).unwrap());
+        
+       
+        let mut encrypted = cipher.encrypt(&nonce, password.as_bytes()).unwrap();
+
+        let mut n = nonce.to_vec();
+        n.append(&mut encrypted);
+        let ciphertext = hex::encode(nonce);
+
+
         let insert = connection
             .execute(
                 "insert into password (name, pass, pass_nonce) VALUES (?1, ?2, ?3)",
-                (name, encrypted, encoded_nonce),
+                (name, ciphertext, encoded_nonce),
             )
             .unwrap();
         assert_eq!(insert, 1);
