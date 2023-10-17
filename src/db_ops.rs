@@ -6,7 +6,7 @@ use aes_gcm::{
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 
-const MASTER_KEYWORD: &str = ".master";
+pub const MASTER_KEYWORD: &str = ".master";
 
 /// Establishes a connection to the SQLite database
 pub fn establish_connection() -> std::result::Result<rusqlite::Connection, rusqlite::Error> {
@@ -35,7 +35,7 @@ pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusql
 /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
 /// - `search_term` - a string slice that holds the name of the password to search for.
 ///
-fn get_password(
+pub fn get_password(
     connection: &Connection,
     search_term: &str,
 ) -> Result<Option<Password>, rusqlite::Error> {
@@ -163,17 +163,9 @@ pub fn insert_data(
         params,
     )?)
 }
-pub fn check_master(connection: &Connection) -> Result<bool, rusqlite::Error> {
-    let mut stmt = connection.prepare("select * from password where name = ? ")?;
-    Ok(stmt
-        .query_row([MASTER_KEYWORD], |_| Ok(true))
-        .optional()?
-        .is_some())
-}
 
 #[cfg(test)]
 mod tests {
-    use super::MASTER_KEYWORD;
     use crate::crypto::derive_key;
     use aes_gcm::{
         aead::{generic_array::GenericArray, Aead, OsRng},
@@ -257,18 +249,5 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(r.password.unwrap(), password);
-    }
-    #[test]
-    fn check_master() {
-        let connection = Connection::open_in_memory().unwrap();
-        super::create_table(&connection).unwrap();
-        assert!(!super::check_master(&connection).unwrap());
-        connection
-            .execute(
-                "insert into password(name, pass) values (?1, ?2)",
-                [MASTER_KEYWORD, "mymasterpassword"],
-            )
-            .unwrap();
-        assert!(super::check_master(&connection).unwrap());
     }
 }
