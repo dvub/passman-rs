@@ -163,6 +163,20 @@ pub fn insert_data(
         params,
     )?)
 }
+pub fn check_password_exists(connection: &Connection, name: &str) -> anyhow::Result<bool> {
+    let mut stmt = connection.prepare("select * from password where name = ? ")?;
+    let master_exists = stmt.query_row([name], |_| Ok(())).optional()?.is_some();
+    Ok(master_exists)
+}
+pub fn authenticate(connection: &Connection, master: &str) -> anyhow::Result<bool> {
+    // unwrapping values because these values MUST exist at this point in the application
+    let record = get_password(connection, MASTER_KEYWORD)?
+        .unwrap()
+        .password
+        .unwrap();
+
+    Ok(hash(master.as_bytes()).to_vec() == hex::decode(record)?)
+}
 
 #[cfg(test)]
 mod tests {
