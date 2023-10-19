@@ -9,7 +9,7 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 use typenum::consts::{U12, U32};
 
-use crate::error::GetPasswordError;
+use crate::error::BackendError;
 
 /// Hashes `text` using `Sha256`.
 ///
@@ -49,10 +49,10 @@ pub fn decrypt_password_field(
     data: impl AsRef<[u8]>,
     nonce: impl AsRef<[u8]>,
     cipher: &AesGcm<Aes256, U12>,
-) -> Result<String, GetPasswordError> {
+) -> Result<String, BackendError> {
     let decrypted = cipher
         .decrypt(GenericArray::from_slice(nonce.as_ref()), data.as_ref())
-        .map_err(GetPasswordError::AesGcm)?;
+        .map_err(BackendError::AesError)?;
     Ok(String::from_utf8(decrypted)?)
 }
 /// Encrypts a `Password` field. May fail with a `aes_gcm::Error`.
