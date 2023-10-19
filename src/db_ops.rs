@@ -1,10 +1,11 @@
-use crate::{crypto::*, error::*, password::Password};
+use crate::{crypto::*, error::*, password::{Password, PasswordField}};
 use aes_gcm::{
     aead::{generic_array::GenericArray, Aead, OsRng},
     AeadCore, Aes256Gcm,
 };
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
+use thiserror::Error;
 
 pub const MASTER_KEYWORD: &str = ".master";
 
@@ -62,7 +63,7 @@ pub fn get_password(
 /// - `password` - A `Password` with encrypted fields.
 /// - `master` - a string slice that holds the master password.
 ///
-fn decrypt_password(password: Password, master: &str) -> Result<Password, GetPasswordError> {
+fn decrypt_password(password: Password, master: &str) -> Result<Password, BackendError> {
     // fucking awesome partial struct destructuring
     let Password {
         id,
@@ -83,7 +84,7 @@ fn decrypt_password(password: Password, master: &str) -> Result<Password, GetPas
                 if decoded_data.len() < 12 {}
                 let nonce = decoded_data
                     .get(..12)
-                    .ok_or_else(|| GetPasswordError::NoMatchingNonce)?;
+                    .ok_or_else(|| BackendError::NoMatchingNonce)?;
                 let ciphertext = decoded_data.get(12..).unwrap();
                 decrypt_password_field(ciphertext, nonce, &cipher)
             })
@@ -117,7 +118,7 @@ pub fn read_password(
     connection: &Connection,
     search_term: &str,
     master: &str,
-) -> std::result::Result<std::option::Option<Password>, GetPasswordError> {
+) -> std::result::Result<std::option::Option<Password>, BackendError> {
     // interestingly this function is just a combination of 2 other functions..
     get_password(connection, search_term)?
         .map(|encrypted| decrypt_password(encrypted, master))
@@ -141,9 +142,9 @@ pub fn insert_data(
     connection: &Connection,
     password_name: &str,
     master: &str,
-    column_name: &str,
+    column_name: PasswordField,
     data: &str,
-) -> std::result::Result<usize, InsertEncryptedFieldError> {
+) -> std::result::Result<usize, BackendError> {
     let cipher = gen_cipher(master, password_name);
     let nonce: GenericArray<u8, typenum::U12> = Aes256Gcm::generate_nonce(OsRng);
     let mut n = nonce.to_vec();
@@ -163,12 +164,15 @@ pub fn insert_data(
         params,
     )?)
 }
-pub fn check_password_exists(connection: &Connection, name: &str) -> anyhow::Result<bool> {
+
+
+
+pub fn check_password_exists(connection: &Connection, name: &str) -> Result<bool, rusqlite::Error> {
     let mut stmt = connection.prepare("select * from password where name = ? ")?;
     let master_exists = stmt.query_row([name], |_| Ok(())).optional()?.is_some();
     Ok(master_exists)
 }
-pub fn authenticate(connection: &Connection, master: &str) -> anyhow::Result<bool> {
+pub fn authenticate(connection: &Connection, master: &str) -> Result<bool, BackendError> {
     // unwrapping values because these values MUST exist at this point in the application
     let record = get_password(connection, MASTER_KEYWORD)?
         .unwrap()
