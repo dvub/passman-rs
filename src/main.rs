@@ -1,6 +1,6 @@
 use std::io;
 
-use cliclack::{confirm, input, note, outro, password, select};
+use cliclack::{confirm, input, log, note, outro, password, select};
 use rusqlite::Connection;
 
 use crate::crypto::{generate_password, hash};
@@ -14,15 +14,11 @@ mod password;
 use crate::db_ops::MASTER_KEYWORD;
 fn main() -> anyhow::Result<()> {
     let connection = establish_connection()?;
-    println!("Connected to SQLite database.");
 
     create_table(&connection)?;
 
     let master_exists = check_password_exists(&connection, MASTER_KEYWORD)?;
     if !master_exists {
-        println!("No master record.");
-        println!();
-
         let new_master = confirmed_password()?;
 
         let master_password = hex::encode(hash(new_master.as_bytes()));
@@ -30,19 +26,17 @@ fn main() -> anyhow::Result<()> {
             "insert into password (name, pass) values (?1, ?2)",
             [MASTER_KEYWORD, &master_password],
         )?;
-        println!();
-        println!("successfully inserted new master record");
+        outro("Inserted a new master record! Exiting...")?;
         std::process::exit(1);
     }
 
-    println!("Found master record.");
-    println!();
     let master = password("Provide a master password").mask('*').interact()?;
 
     if !(authenticate(&connection, &master)?) {
-        outro("Incorrect password. Try again!")?;
+        outro("Incorrect password. Exiting...")?;
         std::process::exit(1);
     }
+    log::success("Successfully authenticated with master record.")?;
 
     let operation = select("What would you like to do?")
         .item("create_update", "Insert OR Update a password", "")
@@ -67,11 +61,14 @@ fn main() -> anyhow::Result<()> {
                 }
                 note("Note", "If you do not messagewish to update a particular field, leave the value empty.")?;
             } else {
-                note("Name is available", "This name is available. (no password was found with that name) Continuing will create a new password.")?;
+                note(
+                    "Name is available",
+                    "This name is available. Continuing will insert a new password.",
+                )?;
             }
             //
-            prompt_field(&connection, &master, &name, "email", "jdoe@myemail.com")?;
-            prompt_field(&connection, &master, &name, "username", "John_Doe")?;
+            prompt_field(&connection, &master, &name, "email", "example@domain.com")?;
+            prompt_field(&connection, &master, &name, "username", "example_username")?;
             prompt_field(&connection, &master, &name, "notes", "any text here")?;
             //
 
@@ -82,7 +79,7 @@ fn main() -> anyhow::Result<()> {
                     "secure & recommended",
                 )
                 .item("manual", "I'll type one myself", "not as secure")
-                .item("none", "I don't want to write down a password", "")
+                .item("none", "I don't want to save a password", "")
                 .interact()?;
             match password_type {
                 "automatic" => {
@@ -122,12 +119,6 @@ fn main() -> anyhow::Result<()> {
                         password.password,
                         password.notes,
                     ];
-                    // FP (ftw) to check if the array of password fields contains only `none` and print a message
-                    if data.iter().all(|field| field.is_none()) {
-                        println!();
-                        println!("no other data found for this record");
-                    }
-
                     for (index, field) in data.iter().enumerate() {
                         match field {
                             Some(m) => {
@@ -158,11 +149,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 pub fn confirmed_password() -> Result<String, io::Error> {
-    let new_password: String = password("Provide a new master password")
-        .mask('*')
-        .interact()?;
+    let new_password: String = password("Enter new password").mask('*').interact()?;
 
-    let confirm: String = password("Confirm new master password")
+    let confirm: String = password("Confirm new password")
         .mask('*')
         .validate(move |pass: &String| {
             if pass != &new_password {
