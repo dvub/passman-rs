@@ -14,3 +14,9 @@ pub struct Password {
     /// Optional password field.
     pub password: Option<String>,
 }
+pub enum PasswordField {
+    Email,
+    Username,
+    Notes,
+    Password
+}
