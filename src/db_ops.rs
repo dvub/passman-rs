@@ -1,11 +1,10 @@
-use crate::{crypto::*, error::*, password::{Password, PasswordField}};
+use crate::{crypto::*, error::*, password::{PasswordInfo, PasswordField}};
 use aes_gcm::{
     aead::{generic_array::GenericArray, Aead, OsRng},
     AeadCore, Aes256Gcm,
 };
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use thiserror::Error;
 
 pub const MASTER_KEYWORD: &str = ".master";
 
@@ -39,10 +38,10 @@ pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusql
 pub fn get_password(
     connection: &Connection,
     search_term: &str,
-) -> Result<Option<Password>, rusqlite::Error> {
+) -> Result<Option<PasswordInfo>, rusqlite::Error> {
     let mut stmt = connection.prepare("select * from password where name = ?")?;
     stmt.query_row([search_term], |row| {
-        Ok(Password {
+        Ok(PasswordInfo {
             id: row.get(0)?,
 
             name: row.get(1)?,
@@ -63,9 +62,9 @@ pub fn get_password(
 /// - `password` - A `Password` with encrypted fields.
 /// - `master` - a string slice that holds the master password.
 ///
-fn decrypt_password(password: Password, master: &str) -> Result<Password, BackendError> {
+fn decrypt_password(password: PasswordInfo, master: &str) -> Result<PasswordInfo, BackendError> {
     // fucking awesome partial struct destructuring
-    let Password {
+    let PasswordInfo {
         id,
         name,
         .. // and the rest
@@ -96,7 +95,7 @@ fn decrypt_password(password: Password, master: &str) -> Result<Password, Backen
     let pass = f(password.password)?;
     let notes = f(password.notes)?;
 
-    Ok(Password {
+    Ok(PasswordInfo {
         id,
         name,
         email,
@@ -118,7 +117,7 @@ pub fn read_password(
     connection: &Connection,
     search_term: &str,
     master: &str,
-) -> std::result::Result<std::option::Option<Password>, BackendError> {
+) -> std::result::Result<std::option::Option<PasswordInfo>, BackendError> {
     // interestingly this function is just a combination of 2 other functions..
     get_password(connection, search_term)?
         .map(|encrypted| decrypt_password(encrypted, master))
@@ -148,13 +147,15 @@ pub fn insert_data(
     let cipher = gen_cipher(master, password_name);
     let nonce: GenericArray<u8, typenum::U12> = Aes256Gcm::generate_nonce(OsRng);
     let mut n = nonce.to_vec();
-
+    
     let mut encrypted = cipher.encrypt(&nonce, data.as_bytes()).unwrap();
     n.append(&mut encrypted);
 
     let ciphertext = hex::encode(n);
 
     let params = [password_name, ciphertext.as_str()];
+
+
     Ok(connection.execute(
         format!(
             "insert into password(name, {}) values (?1, ?2) on conflict(name) do update set {} = ?2 ",
@@ -184,7 +185,7 @@ pub fn authenticate(connection: &Connection, master: &str) -> Result<bool, Backe
 
 #[cfg(test)]
 mod tests {
-    use crate::crypto::derive_key;
+    use crate::{crypto::derive_key, password::PasswordField};
     use aes_gcm::{
         aead::{generic_array::GenericArray, Aead, OsRng},
         AeadCore, Aes256Gcm, Key, KeyInit,
@@ -261,7 +262,7 @@ mod tests {
         let name = "test_name";
         let password = "coolpassword";
 
-        super::insert_data(&connection, name, master, "pass", password).unwrap();
+        super::insert_data(&connection, name, master, PasswordField::Password, password).unwrap();
 
         let r = super::read_password(&connection, name, master)
             .unwrap()
