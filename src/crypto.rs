@@ -55,22 +55,6 @@ pub fn decrypt_password_field(
         .map_err(BackendError::AesError)?;
     Ok(String::from_utf8(decrypted)?)
 }
-/// Encrypts a `Password` field. May fail with a `aes_gcm::Error`.
-///
-/// # Arguments
-/// - `data` - the password field to encrypt.
-/// - `nonce` - a raw nonce to use for encryption.
-/// - `cipher` - an AES 256 GCM cipher to use for decryption.
-///
-pub fn encrypt_password_field(
-    data: impl AsRef<[u8]>,
-    nonce: &aes_gcm::Nonce<U12>,
-    cipher: &AesGcm<Aes256, U12>,
-) -> Result<Vec<u8>, aes_gcm::Error> {
-    let encrypted = cipher.encrypt(nonce, data.as_ref())?;
-    Ok(encrypted)
-}
-
 pub fn gen_cipher(
     master: impl AsRef<[u8]>,
     password_name: impl AsRef<[u8]>,
@@ -125,23 +109,5 @@ mod tests {
         let result = super::decrypt_password_field(ciphertext, nonce, &cipher).unwrap();
 
         assert_eq!(result, "data");
-    }
-    #[test]
-    fn encrypt() {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        // function to test
-
-        // sourced from: https://neurotechnics.com/tools/pbkdf2-test
-        // hex::decode() will decode into an array and then create an encryption key for us to compare to
-        let key = super::derive_key("master", "salt");
-        // manually creating this key/cipher
-        let key = Key::<Aes256Gcm>::from_slice(&key);
-        let cipher = Aes256Gcm::new(key);
-        let res = super::encrypt_password_field("data", &nonce, &cipher);
-
-        // encrypt and compare!
-        let ciphertext = cipher.encrypt(&nonce, b"data".as_ref()).unwrap();
-
-        assert_eq!(res.unwrap(), ciphertext);
     }
 }
