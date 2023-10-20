@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Debug)]
 /// A struct to represent a password
 pub struct Password {
@@ -20,3 +22,5 @@ pub enum PasswordField {
     Notes,
     Password
 }
+
+impl Display for PasswordField
