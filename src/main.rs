@@ -1,6 +1,7 @@
 use std::io;
 
 use cliclack::{confirm, input, log, note, outro, password, select};
+use password::{PasswordField, PasswordInfo};
 use rusqlite::Connection;
 
 use crate::crypto::{generate_password, hash};
@@ -39,13 +40,13 @@ fn main() -> anyhow::Result<()> {
     log::success("Successfully authenticated with master record.")?;
 
     let operation = select("What would you like to do?")
-        .item("create_update", "Insert OR Update a password", "")
-        .item("read", "Get a password", "")
-        .item("delete", "Delete a password", "dangerous")
+        .item(Operation::CreateOrUpdate, "Insert OR Update a password", "")
+        .item(Operation::Read, "Get a password", "")
+        .item(Operation::Delete, "Delete a password", "dangerous")
         .interact()?;
 
     match operation {
-        "create_update" => {
+        Operation::CreateOrUpdate => {
             let name: String = input("Enter Password name?")
                 .placeholder("My new password")
                 .required(true)
@@ -67,22 +68,48 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
             //
-            prompt_field(&connection, &master, &name, "email", "example@domain.com")?;
-            prompt_field(&connection, &master, &name, "username", "example_username")?;
-            prompt_field(&connection, &master, &name, "notes", "any text here")?;
+            prompt_field(
+                &connection,
+                &master,
+                &name,
+                PasswordField::Email,
+                "example@domain.com",
+            )?;
+            prompt_field(
+                &connection,
+                &master,
+                &name,
+                PasswordField::Username,
+                "example_username",
+            )?;
+            prompt_field(
+                &connection,
+                &master,
+                &name,
+                PasswordField::Notes,
+                "any text here",
+            )?;
             //
-
-            let password_type = select("Select password generation type (optional)")
-                .item(
-                    "automatic",
-                    "Generate a password for me",
-                    "secure & recommended",
-                )
-                .item("manual", "I'll type one myself", "not as secure")
-                .item("none", "I don't want to save a password", "")
-                .interact()?;
-            match password_type {
-                "automatic" => {
+            let password_type: PasswordGeneration =
+                select("Select password generation type (optional)")
+                    .item(
+                        PasswordGeneration::Automatic,
+                        "Generate a password for me",
+                        "secure & recommended",
+                    )
+                    .item(
+                        PasswordGeneration::Manual,
+                        "I'll type one myself",
+                        "not as secure",
+                    )
+                    .item(
+                        PasswordGeneration::NoPassword,
+                        "I don't want to save a password",
+                        "",
+                    )
+                    .interact()?;
+            let password: Option<String> = match password_type {
+                PasswordGeneration::Automatic => {
                     let length: String = input("Enter password length")
                         .default_input("12")
                         .placeholder("Your password length")
@@ -97,54 +124,66 @@ fn main() -> anyhow::Result<()> {
                         })
                         .interact()?;
                     let num = length.parse::<usize>().unwrap();
-                    let pass = generate_password(num);
-                    insert_data(&connection, &name, &master, "pass", &pass)?;
+                    Some(generate_password(num))
                 }
-                "manual" => {}
-                "none" => {}
-                &_ => {}
-            }
+                PasswordGeneration::Manual => Some(
+                    input("Enter your new password")
+                        .placeholder("Choose a strong password!")
+                        .interact()?,
+                ),
+                PasswordGeneration::NoPassword => None,
+            };
+            password.map(|password| {
+                insert_data(
+                    &connection,
+                    &name,
+                    &master,
+                    PasswordField::Password,
+                    &password,
+                )
+            });
         }
-        "read" => {
+        Operation::Read => {
             let name: String = input("Enter Password name?")
                 .placeholder("My new password")
                 .required(true)
                 .interact()?;
             let res = read_password(&connection, &name, &master)?;
-            match res {
-                Some(password) => {
-                    let data = [
-                        password.email,
-                        password.username,
-                        password.password,
-                        password.notes,
+            let str = res.map_or_else(
+                || String::from("No password was found with that name."),
+                |password_info: PasswordInfo| {
+                    let fields = [
+                        password_info.email,
+                        password_info.username,
+                        password_info.password,
+                        password_info.notes,
                     ];
-                    for (index, field) in data.iter().enumerate() {
-                        match field {
-                            Some(m) => {
-                                let name = match index {
-                                    0 => "email",
-                                    1 => "username",
-                                    2 => "password",
-                                    3 => "notes",
-                                    _ => "",
-                                };
-                                println!("{}: {}", name, m);
-                            }
-                            None => {}
-                        }
-                    }
-                }
-                None => println!("no password found with that name"),
-            }
+                    fields
+                        .iter()
+                        .enumerate()
+                        .map(|(index, field)| {
+                            let field_name = match index {
+                                0 => "email",
+                                1 => "username",
+                                2 => "password",
+                                3 => "notes",
+                                _ => "",
+                            };
+                            field.as_ref().map_or_else(
+                                || format!("No data found for {}", field_name),
+                                |f| format!("{}: {}", field_name, f),
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                },
+            );
+            note("Password Info", str)?;
         }
-        "update" => {}
-        "delete" => {}
-        &_ => {}
+        Operation::Delete => {}
+        Operation::Exit => {}
     }
-
     outro("You're all set!")?;
-
     Ok(())
 }
 
@@ -164,11 +203,28 @@ pub fn confirmed_password() -> Result<String, io::Error> {
     Ok(confirm)
 }
 
+#[derive(Default, Clone, PartialEq, Eq)]
+enum Operation {
+    CreateOrUpdate,
+    Read,
+    Delete,
+    #[default]
+    Exit,
+}
+
+#[derive(Default, Clone, PartialEq, Eq)]
+enum PasswordGeneration {
+    #[default]
+    Automatic,
+    Manual,
+    NoPassword,
+}
+
 pub fn prompt_field(
     connection: &Connection,
     master: &str,
     name: &str,
-    param: &str,
+    param: PasswordField,
     placeholder: &str,
 ) -> anyhow::Result<()> {
     let data = input(format!("Enter {} (optional)", param))
