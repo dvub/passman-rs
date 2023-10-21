@@ -4,8 +4,15 @@ mod cli;
 use cliclack::{intro, outro, select};
 use colored::Colorize;
 
-use backend::db_ops::*;
-use cli::{delete, insert, insert_master, login, read, Operation};
+use backend::db_ops::{
+    util::{check_password_exists, create_table, establish_connection},
+    *,
+};
+use cli::{
+    crud::{delete, insert, read},
+    util::{insert_master, login},
+    Operation,
+};
 
 // todo
 // [x] refactor monolith frontend
