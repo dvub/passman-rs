@@ -52,7 +52,7 @@ pub fn decrypt_password_field(
 ) -> Result<String, BackendError> {
     let decrypted = cipher
         .decrypt(GenericArray::from_slice(nonce.as_ref()), data.as_ref())
-        .map_err(BackendError::AesError)?;
+        .map_err(|_| BackendError::AesError)?;
     Ok(String::from_utf8(decrypted)?)
 }
 pub fn gen_cipher(

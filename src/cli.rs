@@ -7,6 +7,7 @@ use crate::{
     password::{PasswordField, PasswordInfo},
 };
 use cliclack::{confirm, input, note, outro, password, select};
+use colored::Colorize;
 use rusqlite::Connection;
 use std::io;
 
@@ -20,22 +21,29 @@ pub enum Operation {
 }
 #[derive(Default, Clone, PartialEq, Eq)]
 pub enum PasswordGeneration {
-    #[default]
     Automatic,
     Manual,
+    #[default]
     NoPassword,
 }
 
 pub fn insert_master(connection: &Connection, master_exists: bool) -> anyhow::Result<()> {
     if !master_exists {
+        cliclack::note(
+            "No master record found.",
+            "You'll be prompted to create a master record by entering a new master password.",
+        )?;
         let new_master = confirmed_password()?;
 
         let master_password = hex::encode(hash(new_master.as_bytes()));
         connection.execute(
-            "insert into password (name, pass) values (?1, ?2)",
+            "insert into PasswordInfo (name, password) values (?1, ?2)",
             [MASTER_KEYWORD, &master_password],
         )?;
-        outro("Inserted a new master record! Exiting...")?;
+        outro(format!(
+            "Successfully inserted a new master record!\n\t{}",
+            "Exiting...".green().bold()
+        ))?;
     }
     Ok(())
 }
@@ -69,6 +77,10 @@ pub fn insert(connection: &Connection, master: &str) -> anyhow::Result<()> {
     )?;
     prompt_password(connection, &name, &master)?;
 
+    outro(format!(
+        "Successfully inserted a new password!\n\t{}",
+        "Exiting...".green().bold()
+    ))?;
     Ok(())
 }
 pub fn check_password_availability(connection: &Connection, name: &str) -> anyhow::Result<()> {
@@ -85,7 +97,7 @@ pub fn check_password_availability(connection: &Connection, name: &str) -> anyho
         )?;
     } else {
         note(
-            "Name is available",
+            "Name is unused",
             "This name is available. Continuing will insert a new password.",
         )?;
     }
@@ -154,35 +166,37 @@ pub fn read(connection: &Connection, master: &str) -> anyhow::Result<()> {
     let res = read_password(&connection, &name, &master)?;
     let str = res.map_or_else(
         || String::from("No password was found with that name."),
-        |password_info: PasswordInfo| {
-            let fields = [
-                password_info.email,
-                password_info.username,
-                password_info.password,
-                password_info.notes,
-            ];
-            fields
-                .iter()
-                .enumerate()
-                .map(|(index, field)| {
-                    let field_name = match index {
-                        0 => "email",
-                        1 => "username",
-                        2 => "password",
-                        3 => "notes",
-                        _ => "",
-                    };
-                    field.as_ref().map_or_else(
-                        || format!("No data found for {}", field_name),
-                        |f| format!("{}: {}", field_name, f),
-                    )
-                })
-                .collect::<Vec<String>>()
-                .join("\n")
-        },
+        |password_info: PasswordInfo| print_password_info(password_info),
     );
     note("Password Info", str)?;
+    outro("Exiting...".bold())?;
     Ok(())
+}
+pub fn print_password_info(password_info: PasswordInfo) -> String {
+    let fields = [
+        password_info.email,
+        password_info.username,
+        password_info.password,
+        password_info.notes,
+    ];
+    fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let field_name = match index {
+                0 => "email",
+                1 => "username",
+                2 => "password",
+                3 => "notes",
+                _ => "",
+            };
+            field.as_ref().map_or_else(
+                || format!("No data found for {}", field_name),
+                |f| format!("{}: {}", field_name, f),
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
 }
 
 pub fn delete(connection: &Connection) -> anyhow::Result<()> {
@@ -206,13 +220,12 @@ pub fn delete(connection: &Connection) -> anyhow::Result<()> {
     }
 
     delete_password(&connection, &name)?;
-    outro("Successfully deleted password.")?;
+    outro("Successfully deleted password.".bold())?;
     Ok(())
 }
 
 pub fn confirmed_password() -> Result<String, io::Error> {
     let new_password: String = password("Enter new password").mask('*').interact()?;
-
     let confirm: String = password("Confirm new password")
         .mask('*')
         .validate(move |pass: &String| {

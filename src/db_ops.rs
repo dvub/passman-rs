@@ -7,25 +7,24 @@ use aes_gcm::{
     aead::{generic_array::GenericArray, Aead, OsRng},
     AeadCore, Aes256Gcm,
 };
-use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 
 pub const MASTER_KEYWORD: &str = ".master";
 
 /// Establishes a connection to the SQLite database
-pub fn establish_connection() -> std::result::Result<rusqlite::Connection, rusqlite::Error> {
+pub fn establish_connection() -> Result<rusqlite::Connection, rusqlite::Error> {
     Connection::open("./data.db")
 }
 
 /// Creates the SQLite table equivelant of the `Password` struct.
-pub fn create_table(connection: &Connection) -> std::result::Result<usize, rusqlite::Error> {
+pub fn create_table(connection: &Connection) -> Result<usize, rusqlite::Error> {
     connection.execute(
-        "create table if not exists password(
+        "CREATE TABLE IF NOT EXISTS PasswordInfo (
         id INTEGER NOT NULL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         username TEXT DEFAULT NULL,
         email TEXT DEFAULT NULL,
-        pass TEXT DEFAULT NULL,
+        password TEXT DEFAULT NULL,
         notes TEXT DEFAULT NULL
       );",
         (),
@@ -43,7 +42,7 @@ pub fn get_password(
     connection: &Connection,
     search_term: &str,
 ) -> Result<Option<PasswordInfo>, rusqlite::Error> {
-    let mut stmt = connection.prepare("select * from password where name = ?")?;
+    let mut stmt = connection.prepare("select * from PasswordInfo where name = ?")?;
     stmt.query_row([search_term], |row| {
         Ok(PasswordInfo {
             id: row.get(0)?,
@@ -64,7 +63,7 @@ pub fn get_password(
 /// # Arguments
 ///
 /// - `password` - A `Password` with encrypted fields.
-/// - `master` - a string slice that holds the master password.
+/// - `master` - a string slice that holds the master password. The master password should be verified/authenticated by the time this function is called.
 ///
 fn decrypt_password(password: PasswordInfo, master: &str) -> Result<PasswordInfo, BackendError> {
     // fucking awesome partial struct destructuring
@@ -108,14 +107,17 @@ fn decrypt_password(password: PasswordInfo, master: &str) -> Result<PasswordInfo
         password: pass,
     })
 }
-/// Reads and decrypts a password from the SQLite database.
+
+// the following are functions that implement CRUD (create, read, update, delete)
+
+/// Reads and decrypts a password from the SQLite table `PasswordInfo`.
 /// This function will return a result with the `GetPasswordError` enum, which wraps an `Option`;
 /// If no `Password` name matches the given `search_term`, the function will return `None`.
 /// # Arguments
 ///
 /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
 /// - `search_term` - a string slice that holds the name of the password to search for.
-/// - `master` - a string slice holding the master password.
+/// - `master` - a string slice holding the master password. The master password should be verified/authenticated by the time this function is called.
 ///
 pub fn read_password(
     connection: &Connection,
@@ -127,7 +129,7 @@ pub fn read_password(
         .map(|encrypted| decrypt_password(encrypted, master))
         .transpose()
 }
-/// Encrypts and inserts a field into the SQLite database.
+/// Encrypts and inserts a field into the SQLite table `PasswordInfo`.
 /// This function makes use of SQLite's `UPSERT` statement, i.e. create an entry with the given value to insert, or update an existing entry.
 /// (Note: this function serves the purpose of Updating and Creating within the CRUD model)
 /// This function will return a result with the `InsertEncryptedFieldError` enum.
@@ -136,9 +138,8 @@ pub fn read_password(
 ///
 /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
 /// - `password_name` - a string slice that holds the name of the password to insert or update into.
-/// - `column_name` - a string slice holding the column to insert or update into.
-/// - `master` - a string slice holding the master password.
-/// - `column_name` - a `PasswordColumn` to insert or update data into.
+/// - `master` - a string slice holding the master password. The master password should be verified/authenticated by the time this function is called.
+/// - `column_name` - a `PasswordField` to insert or update data into.
 /// - `data` - a string slice holding the data to encrypt and insert into the entry.
 ///
 pub fn insert_data(
@@ -161,7 +162,7 @@ pub fn insert_data(
 
     Ok(connection.execute(
         format!(
-            "insert into password(name, {}) values (?1, ?2) on conflict(name) do update set {} = ?2 ",
+            "insert into PasswordInfo(name, {}) values (?1, ?2) on conflict(name) do update set {} = ?2 ",
             column_name, column_name
         )
         .as_str(),
@@ -169,15 +170,46 @@ pub fn insert_data(
     )?)
 }
 
-pub fn delete_password(connection: &Connection, name: &str) -> Result<usize, rusqlite::Error> {
-    connection.execute("delete from password  where name = ?", [name])
+/// Deletes one record from the SQLite table `PasswordInfo` Use with caution!.
+///  # Arguments
+///
+/// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
+/// - `password_name` - a string slice that holds the name of the password to insert or update into.
+///
+pub fn delete_password(
+    connection: &Connection,
+    password_name: &str,
+) -> Result<usize, rusqlite::Error> {
+    connection.execute("delete from PasswordInfo where name = ?", [password_name])
 }
 
-pub fn check_password_exists(connection: &Connection, name: &str) -> Result<bool, rusqlite::Error> {
-    let mut stmt = connection.prepare("select * from password where name = ? ")?;
-    let master_exists = stmt.query_row([name], |_| Ok(())).optional()?.is_some();
+// the following functions are utility/convenience functions
+
+/// Check if a password exists. May fail with `rusqlite::Error`.
+/// Checks if an `optional()` query `is_some()`, i.e. returns `false` if `None`.
+/// ///  # Arguments
+///
+/// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
+/// - `password_name` - a string slice that holds the name of the password to insert or update into.
+///
+pub fn check_password_exists(
+    connection: &Connection,
+    password_name: &str,
+) -> Result<bool, rusqlite::Error> {
+    let mut stmt = connection.prepare("select * from PasswordInfo where name = ? ")?;
+    let master_exists = stmt
+        .query_row([password_name], |_| Ok(()))
+        .optional()?
+        .is_some();
     Ok(master_exists)
 }
+/// Check if a password exists. May fail with `rusqlite::Error`.
+/// Checks if an `optional()` query `is_some()`, i.e. returns `false` if `None`.
+/// ///  # Arguments
+///
+/// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
+/// - `master` - a string slice that holds the master password.
+///
 pub fn authenticate(connection: &Connection, master: &str) -> Result<bool, BackendError> {
     // unwrapping values because these values MUST exist at this point in the application
     let record = get_password(connection, MASTER_KEYWORD)?
@@ -199,7 +231,7 @@ mod tests {
 
     fn insert_test_data(connection: &Connection) -> std::result::Result<usize, rusqlite::Error> {
         connection.execute(
-            "insert into password (name, username, email, pass) VALUES (?1, ?2, ?3, ?4)",
+            "insert into PasswordInfo (name, username, email, password) VALUES (?1, ?2, ?3, ?4)",
             ("test_name", "cool_user1", "cool_user@usermail.com", "12345"),
         )
     }
@@ -243,7 +275,7 @@ mod tests {
 
         let insert = connection
             .execute(
-                "insert into password (name, pass) VALUES (?1, ?2)",
+                "insert into PasswordInfo (name, password) VALUES (?1, ?2)",
                 (name, ciphertext),
             )
             .unwrap();

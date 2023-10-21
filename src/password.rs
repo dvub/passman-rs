@@ -17,6 +17,7 @@ pub struct PasswordInfo {
     /// Optional password field.
     pub password: Option<String>,
 }
+/// Enum containing different fields on `PasswordInfo`. Primarily used in inserting or updating data.
 #[derive(Debug)]
 pub enum PasswordField {
     Email,
@@ -30,9 +31,23 @@ impl Display for PasswordField {
         let str = match self {
             PasswordField::Email => "email",
             PasswordField::Username => "username",
-            PasswordField::Password => "pass",
+            PasswordField::Password => "password",
             PasswordField::Notes => "notes",
         };
         write!(f, "{}", str)
+    }
+}
+
+// is this even necessary?
+#[cfg(test)]
+mod tests {
+    use crate::password::PasswordField;
+
+    #[test]
+    fn test_display() {
+        assert_eq!(PasswordField::Email.to_string(), "email");
+        assert_eq!(PasswordField::Username.to_string(), "username");
+        assert_eq!(PasswordField::Password.to_string(), "password");
+        assert_eq!(PasswordField::Notes.to_string(), "notes");
     }
 }
