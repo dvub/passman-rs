@@ -1,24 +1,18 @@
-use cli::{delete, insert, insert_master, read, Operation};
+mod backend;
+mod cli;
+
 use cliclack::{intro, outro, password, select};
 use colored::Colorize;
 
-use crate::db_ops::*;
-
-mod cli;
-mod crypto;
-mod db_ops;
-mod error;
-mod password;
-
-use crate::db_ops::MASTER_KEYWORD;
-
+use backend::db_ops::*;
+use cli::{delete, insert, insert_master, read, Operation};
 // todo
 // [x] refactor monolith frontend
 // [~] add nice colors to frontend
 
 // GRAHH
 // [x] re-document backend
-// write the remaining tests for db_ops.rs
+// [x] write the remaining tests for db_ops.rs
 
 // FUNCTIONALITY
 // add note field recovery method for master password

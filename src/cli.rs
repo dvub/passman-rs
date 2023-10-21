@@ -1,4 +1,4 @@
-use crate::{
+use crate::backend::{
     crypto::{generate_password, hash},
     db_ops::{
         check_password_exists, delete_password, get_password, insert_data, read_password,

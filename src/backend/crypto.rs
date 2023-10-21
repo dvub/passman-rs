@@ -9,7 +9,7 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 use typenum::consts::{U12, U32};
 
-use crate::error::BackendError;
+use crate::backend::error::BackendError;
 
 /// Hashes `text` using `Sha256`.
 ///

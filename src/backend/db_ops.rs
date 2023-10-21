@@ -1,4 +1,4 @@
-use crate::{
+use crate::backend::{
     crypto::*,
     error::*,
     password::{PasswordField, PasswordInfo},
@@ -222,7 +222,7 @@ pub fn authenticate(connection: &Connection, master: &str) -> Result<bool, Backe
 
 #[cfg(test)]
 mod tests {
-    use crate::{crypto::derive_key, password::PasswordField};
+    use crate::{backend::crypto::derive_key, backend::password::PasswordField};
     use aes_gcm::{
         aead::{generic_array::GenericArray, Aead, OsRng},
         AeadCore, Aes256Gcm, Key, KeyInit,
