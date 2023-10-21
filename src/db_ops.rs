@@ -1,4 +1,8 @@
-use crate::{crypto::*, error::*, password::{PasswordInfo, PasswordField}};
+use crate::{
+    crypto::*,
+    error::*,
+    password::{PasswordField, PasswordInfo},
+};
 use aes_gcm::{
     aead::{generic_array::GenericArray, Aead, OsRng},
     AeadCore, Aes256Gcm,
@@ -147,14 +151,13 @@ pub fn insert_data(
     let cipher = gen_cipher(master, password_name);
     let nonce: GenericArray<u8, typenum::U12> = Aes256Gcm::generate_nonce(OsRng);
     let mut n = nonce.to_vec();
-    
+
     let mut encrypted = cipher.encrypt(&nonce, data.as_bytes()).unwrap();
     n.append(&mut encrypted);
 
     let ciphertext = hex::encode(n);
 
     let params = [password_name, ciphertext.as_str()];
-
 
     Ok(connection.execute(
         format!(
@@ -166,7 +169,9 @@ pub fn insert_data(
     )?)
 }
 
-
+pub fn delete_password(connection: &Connection, name: &str) -> Result<usize, rusqlite::Error> {
+    connection.execute("delete from password  where name = ?", [name])
+}
 
 pub fn check_password_exists(connection: &Connection, name: &str) -> Result<bool, rusqlite::Error> {
     let mut stmt = connection.prepare("select * from password where name = ? ")?;
