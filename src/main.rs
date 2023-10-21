@@ -22,7 +22,6 @@ use crate::db_ops::MASTER_KEYWORD;
 
 // FUNCTIONALITY
 // add note field recovery method for master password
-// create backup sqlite table for passwords
 
 // SPEED
 // benchmarking
@@ -33,9 +32,8 @@ fn main() -> anyhow::Result<()> {
 
     intro("passman.rs")?;
 
-    let master_exists = check_password_exists(&connection, MASTER_KEYWORD)?;
-    if !master_exists {
-        insert_master(&connection, master_exists)?;
+    if !check_password_exists(&connection, MASTER_KEYWORD)? {
+        insert_master(&connection)?;
         return Ok(());
     }
 

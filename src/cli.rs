@@ -11,6 +11,8 @@ use colored::Colorize;
 use rusqlite::Connection;
 use std::io;
 
+// simple and probably unnecessary enums for control flow in the main application
+
 #[derive(Default, Clone, PartialEq, Eq)]
 pub enum Operation {
     Insert,
@@ -26,28 +28,9 @@ pub enum PasswordGeneration {
     #[default]
     NoPassword,
 }
+// these are the CLI frontend implementations of the CRUD operations
 
-pub fn insert_master(connection: &Connection, master_exists: bool) -> anyhow::Result<()> {
-    if !master_exists {
-        cliclack::note(
-            "No master record found.",
-            "You'll be prompted to create a master record by entering a new master password.",
-        )?;
-        let new_master = confirmed_password()?;
-
-        let master_password = hex::encode(hash(new_master.as_bytes()));
-        connection.execute(
-            "insert into PasswordInfo (name, password) values (?1, ?2)",
-            [MASTER_KEYWORD, &master_password],
-        )?;
-        outro(format!(
-            "Successfully inserted a new master record!\n\t{}",
-            "Exiting...".green().bold()
-        ))?;
-    }
-    Ok(())
-}
-
+/// Series of prompts to insert a new password into the SQLite table `PasswordInfo`.
 pub fn insert(connection: &Connection, master: &str) -> anyhow::Result<()> {
     let name: String = input("Enter Password name?")
         .placeholder("My new password")
@@ -83,6 +66,112 @@ pub fn insert(connection: &Connection, master: &str) -> anyhow::Result<()> {
     ))?;
     Ok(())
 }
+
+/// Series of prompts to read password info. If it finds data given user input, it will print the details of the given password.
+pub fn read(connection: &Connection, master: &str) -> anyhow::Result<()> {
+    let name: String = input("Enter Password name?")
+        .placeholder("My new password")
+        .required(true)
+        .interact()?;
+    let res = read_password(&connection, &name, &master)?;
+    let str = res.map_or_else(
+        || String::from("No password was found with that name."),
+        |password_info: PasswordInfo| print_password_info(password_info),
+    );
+    note("Password Info", str)?;
+    outro("Exiting...".bold())?;
+    Ok(())
+}
+/// Series of prompts *and **confirmations*** to delete data from the SQLite table `PasswordInfo`. Only requires an `sqlite::Connection`.
+pub fn delete(connection: &Connection) -> anyhow::Result<()> {
+    let name: String = input("Enter Password name?")
+        .placeholder("My new password")
+        .required(true)
+        .interact()?;
+
+    let check_exists = check_password_exists(&connection, &name)?;
+    if !check_exists {
+        outro("No password found with that name.")?;
+        return Ok(());
+    }
+    // it's a big deal to delete data so make sure the user understands they're doing some serious shit
+    note(
+        "Password Deletion",
+        "You are about to delete a password. This action is UNDOABLE and your data will be lost FOREVER. There is NO BACKUP or restoration process, so PLEASE SAVE THIS DATA BEFORE YOU DELETE IT. ",
+    )?;
+    let confirm = confirm("Deleting a password... Continue?")
+        .initial_value(false)
+        .interact()?;
+
+    if !confirm {
+        outro("Exiting...")?;
+        return Ok(());
+    }
+
+    delete_password(&connection, &name)?;
+    outro("Successfully deleted password.".bold())?;
+    Ok(())
+}
+
+// all of this is just utility functions and refactoring (and abstracting and the like)
+
+/// Inserts a new master password given a series of prompts and inputs.
+/// The input is a `confirmed_password`, meaning the user must type the same password twice.
+/// The function then hashes the master password and inserts it into the SQLite table `PasswordInfo`.
+/// On that note, the master password is stored in the same table as all other data, with a special keyword.
+pub fn insert_master(connection: &Connection) -> anyhow::Result<()> {
+    cliclack::note(
+        "No master record found.",
+        "You'll be prompted to create a master record by entering a new master password.",
+    )?;
+    let new_master = confirmed_password()?;
+
+    let master_password = hex::encode(hash(new_master.as_bytes()));
+    connection.execute(
+        "insert into PasswordInfo (name, password) values (?1, ?2)",
+        [MASTER_KEYWORD, &master_password],
+    )?;
+    outro(format!(
+        "Successfully inserted a new master record!\n\t{}",
+        "Exiting...".green().bold()
+    ))?;
+
+    Ok(())
+}
+/// Prompts the user for a confirmed password, meaning that they must type the same password twice.
+pub fn confirmed_password() -> Result<String, io::Error> {
+    let new_password: String = password("Enter new password").mask('*').interact()?;
+    let confirm: String = password("Confirm new password")
+        .mask('*')
+        .validate(move |pass: &String| {
+            if pass != &new_password {
+                Err("Passwords must match")
+            } else {
+                Ok(())
+            }
+        })
+        .interact()?;
+    Ok(confirm)
+}
+
+pub fn prompt_field(
+    connection: &Connection,
+    master: &str,
+    name: &str,
+    param: PasswordField,
+    placeholder: &str,
+) -> anyhow::Result<()> {
+    let data = input(format!("Enter {} (optional)", param))
+        .placeholder(placeholder)
+        .default_input("")
+        .interact::<String>()?;
+    if !data.is_empty() {
+        insert_data(connection, name, master, param, &data)?;
+    }
+    Ok(())
+}
+/// Utility function to print the details on the availability/use of a password name when inserting/updating a password.
+/// If a password exists with a given `name`, the user has the option to exit the program and not update the data.
 pub fn check_password_availability(connection: &Connection, name: &str) -> anyhow::Result<()> {
     if get_password(&connection, &name)?.is_some() {
         let confirm =
@@ -104,6 +193,9 @@ pub fn check_password_availability(connection: &Connection, name: &str) -> anyho
     Ok(())
 }
 
+/// Prompts a series of inputs to generate a password.
+///  A user may either automatically generate a password or manually type one, or not insert a password at all.
+///
 pub fn prompt_password(connection: &Connection, name: &str, master: &str) -> anyhow::Result<()> {
     let password_type: PasswordGeneration = select("Select password generation type (optional)")
         .item(
@@ -157,21 +249,8 @@ pub fn prompt_automatic() -> Result<String, io::Error> {
     let num = length.parse::<usize>().unwrap();
     Ok(generate_password(num))
 }
-
-pub fn read(connection: &Connection, master: &str) -> anyhow::Result<()> {
-    let name: String = input("Enter Password name?")
-        .placeholder("My new password")
-        .required(true)
-        .interact()?;
-    let res = read_password(&connection, &name, &master)?;
-    let str = res.map_or_else(
-        || String::from("No password was found with that name."),
-        |password_info: PasswordInfo| print_password_info(password_info),
-    );
-    note("Password Info", str)?;
-    outro("Exiting...".bold())?;
-    Ok(())
-}
+/// Prints a `cliclack::note()` containing the individual fields of password data, i.e. an instance of `PasswordInfo`.
+/// If no data is found, a specific message will be printed.
 pub fn print_password_info(password_info: PasswordInfo) -> String {
     let fields = [
         password_info.email,
@@ -197,61 +276,4 @@ pub fn print_password_info(password_info: PasswordInfo) -> String {
         })
         .collect::<Vec<String>>()
         .join("\n")
-}
-
-pub fn delete(connection: &Connection) -> anyhow::Result<()> {
-    let name: String = input("Enter Password name?")
-        .placeholder("My new password")
-        .required(true)
-        .interact()?;
-
-    let check_exists = check_password_exists(&connection, &name)?;
-    if !check_exists {
-        outro("No password found with that name.")?;
-        return Ok(());
-    }
-    let confirm = confirm("you are about to delete a password. Continue?")
-        .initial_value(false)
-        .interact()?;
-
-    if !confirm {
-        outro("Exiting...")?;
-        return Ok(());
-    }
-
-    delete_password(&connection, &name)?;
-    outro("Successfully deleted password.".bold())?;
-    Ok(())
-}
-
-pub fn confirmed_password() -> Result<String, io::Error> {
-    let new_password: String = password("Enter new password").mask('*').interact()?;
-    let confirm: String = password("Confirm new password")
-        .mask('*')
-        .validate(move |pass: &String| {
-            if pass != &new_password {
-                Err("Passwords must match")
-            } else {
-                Ok(())
-            }
-        })
-        .interact()?;
-    Ok(confirm)
-}
-
-pub fn prompt_field(
-    connection: &Connection,
-    master: &str,
-    name: &str,
-    param: PasswordField,
-    placeholder: &str,
-) -> anyhow::Result<()> {
-    let data = input(format!("Enter {} (optional)", param))
-        .placeholder(placeholder)
-        .default_input("")
-        .interact::<String>()?;
-    if !data.is_empty() {
-        insert_data(connection, name, master, param, &data)?;
-    }
-    Ok(())
 }
