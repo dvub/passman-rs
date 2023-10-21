@@ -1,21 +1,15 @@
 mod backend;
 mod cli;
 
-use cliclack::{intro, outro, password, select};
+use cliclack::{intro, outro, select};
 use colored::Colorize;
 
 use backend::db_ops::*;
-use cli::{delete, insert, insert_master, read, Operation};
+use cli::{delete, insert, insert_master, login, read, Operation};
+
 // todo
 // [x] refactor monolith frontend
 // [~] add nice colors to frontend
-
-// GRAHH
-// [x] re-document backend
-// [x] write the remaining tests for db_ops.rs
-
-// FUNCTIONALITY
-// add note field recovery method for master password
 
 // SPEED
 // benchmarking
@@ -30,14 +24,7 @@ fn main() -> anyhow::Result<()> {
         insert_master(&connection)?;
         return Ok(());
     }
-
-    let master = password(format!("Enter {}", "master password:".bright_red().bold()))
-        .mask('*')
-        .interact()?;
-    if !(authenticate(&connection, &master)?) {
-        outro("Incorrect password. Exiting...".red().bold())?;
-        return Ok(());
-    }
+    let master = login(&connection)?;
 
     let operation = select("What would you like to do?")
         .item(Operation::Insert, "Insert or Update a password", "")

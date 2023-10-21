@@ -20,4 +20,7 @@ pub enum BackendError {
 
     #[error("no nonce was found matching the field")]
     NoMatchingNonce,
+
+    #[error("Attempted to authenticate invalid master record field")]
+    InvalidMasterRecordField,
 }

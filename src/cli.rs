@@ -1,8 +1,8 @@
 use crate::backend::{
     crypto::{generate_password, hash},
     db_ops::{
-        check_password_exists, delete_password, get_password, insert_data, read_password,
-        MASTER_KEYWORD,
+        authenticate, check_password_exists, delete_password, get_password, insert_data,
+        read_password, MASTER_KEYWORD,
     },
     password::{PasswordField, PasswordInfo},
 };
@@ -27,6 +27,14 @@ pub enum PasswordGeneration {
     Manual,
     #[default]
     NoPassword,
+}
+
+#[derive(Default, Clone, PartialEq, Eq)]
+pub enum LoginOperations {
+    Login,
+    Reset,
+    #[default]
+    Exit,
 }
 // these are the CLI frontend implementations of the CRUD operations
 
@@ -126,10 +134,15 @@ pub fn insert_master(connection: &Connection) -> anyhow::Result<()> {
     )?;
     let new_master = confirmed_password()?;
 
+    note("Recovery Phrase", "This is the ONLY WAY to change your master password, so DO NOT lose this phrase.\nBetter yet, don't lose your master password.")?;
+    let recovery_note: String = input("Enter a recovery phrase.").interact()?;
+
     let master_password = hex::encode(hash(new_master.as_bytes()));
+    let note = hex::encode(hash(recovery_note.as_bytes()));
+
     connection.execute(
-        "insert into PasswordInfo (name, password) values (?1, ?2)",
-        [MASTER_KEYWORD, &master_password],
+        "insert into PasswordInfo (name, password, notes) values (?1, ?2, ?3)",
+        [MASTER_KEYWORD, &master_password, &note],
     )?;
     outro(format!(
         "Successfully inserted a new master record!\n\t{}",
@@ -138,6 +151,58 @@ pub fn insert_master(connection: &Connection) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+pub fn login(connection: &Connection) -> anyhow::Result<String> {
+    let login_operation: LoginOperations = select("Select a login option.")
+        .item(LoginOperations::Login, "Log in", "")
+        .item(
+            LoginOperations::Reset,
+            "Reset master password",
+            "use recovery phrase",
+        )
+        .item(LoginOperations::Exit, "Exit", "")
+        .interact()?;
+
+    let master = match login_operation {
+        LoginOperations::Login => {
+            let master = password(format!("Enter {}", "master password:".bright_red().bold()))
+                .mask('*')
+                .interact()?;
+            if !(authenticate(&connection, &master, PasswordField::Password)?) {
+                outro("Incorrect password. Exiting...".red().bold())?;
+                std::process::exit(1);
+            }
+
+            master
+        }
+        LoginOperations::Reset => {
+            let recovery_phrase =
+                password(format!("Enter {}", "recovery phrase:".bright_red().bold()))
+                    .mask('*')
+                    .interact()?;
+            if !(authenticate(&connection, &recovery_phrase, PasswordField::Notes)?) {
+                outro("Incorrect recovery phrase. Exiting...".red().bold())?;
+                std::process::exit(1);
+            }
+
+            let new_master = hex::encode(hash(confirmed_password()?.as_bytes()));
+            connection.execute(
+                "update PasswordInfo set password = ?1 where name = ?2",
+                [&new_master, MASTER_KEYWORD],
+            )?;
+
+            outro("Updated master password!")?;
+
+            std::process::exit(1);
+        }
+        LoginOperations::Exit => {
+            outro("Exiting...".green().bold())?;
+            std::process::exit(1);
+        }
+    };
+    Ok(master)
+}
+
 /// Prompts the user for a confirmed password, meaning that they must type the same password twice.
 pub fn confirmed_password() -> Result<String, io::Error> {
     let new_password: String = password("Enter new password").mask('*').interact()?;
