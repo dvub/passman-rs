@@ -37,7 +37,7 @@ pub mod crud {
     use rusqlite::Connection;
 
     use super::util::{
-        check_password_availability, print_password_info, prompt_field, prompt_password,
+        check_password_availability, password::prompt_password, print_password_info, prompt_field,
     };
     /// Series of prompts to insert a new password into the SQLite table `PasswordInfo`.
     pub fn insert(connection: &Connection, master: &str) -> anyhow::Result<()> {
@@ -126,7 +126,7 @@ pub mod crud {
 // all of this is just utility functions and refactoring (and abstracting and the like)
 pub mod util {
     use crate::backend::{
-        crypto::{generate_password, hash},
+        crypto::hash,
         db_ops::{
             crud::{get_password, insert_data},
             util::authenticate,
@@ -137,11 +137,99 @@ pub mod util {
     use cliclack::{confirm, input, note, outro, password, select};
     use colored::Colorize;
     use rusqlite::Connection;
-    use std::io;
 
-    pub mod password {}
+    pub mod password {
+        use cliclack::{input, password, select};
+        use rusqlite::Connection;
+        use std::io;
 
-    use super::{LoginOperations, PasswordGeneration};
+        use crate::{
+            backend::{
+                crypto::generate_password, db_ops::crud::insert_data, password::PasswordField,
+            },
+            cli::PasswordGeneration,
+        };
+
+        /// Prompts the user for a confirmed password, meaning that they must type the same password twice.
+        pub fn confirmed_password() -> Result<String, io::Error> {
+            let new_password: String = password("Enter new password").mask('*').interact()?;
+            let confirm: String = password("Confirm new password")
+                .mask('*')
+                .validate(move |pass: &String| {
+                    if pass != &new_password {
+                        Err("Passwords must match")
+                    } else {
+                        Ok(())
+                    }
+                })
+                .interact()?;
+            Ok(confirm)
+        }
+
+        /// Prompts a series of inputs to generate a password.
+        ///  A user may either automatically generate a password or manually type one, or not insert a password at all.
+        ///
+        pub fn prompt_password(
+            connection: &Connection,
+            name: &str,
+            master: &str,
+        ) -> anyhow::Result<()> {
+            let password_type: PasswordGeneration =
+                select("Select password generation type (optional)")
+                    .item(
+                        PasswordGeneration::Automatic,
+                        "Generate a password for me",
+                        "secure & recommended",
+                    )
+                    .item(
+                        PasswordGeneration::Manual,
+                        "I'll type one myself",
+                        "not as secure",
+                    )
+                    .item(
+                        PasswordGeneration::NoPassword,
+                        "I don't want to save a password",
+                        "",
+                    )
+                    .interact()?;
+            let password: Option<String> = match password_type {
+                PasswordGeneration::Automatic => Some(prompt_automatic()?),
+                PasswordGeneration::Manual => Some(confirmed_password()?),
+                PasswordGeneration::NoPassword => None,
+            };
+
+            password.map(|password| {
+                insert_data(
+                    &connection,
+                    &name,
+                    &master,
+                    PasswordField::Password,
+                    &password,
+                )
+            });
+            Ok(())
+        }
+
+        pub fn prompt_automatic() -> Result<String, io::Error> {
+            let length: String = input("Enter password length")
+                .default_input("12")
+                .placeholder("Your password length")
+                .validate(|input: &String| {
+                    let num = input.parse::<i32>();
+
+                    if num.is_err() {
+                        Err("Please enter a number.")
+                    } else {
+                        Ok(())
+                    }
+                })
+                .interact()?;
+            let num = length.parse::<usize>().unwrap();
+            Ok(generate_password(num))
+        }
+    }
+    use self::password::confirmed_password;
+    use super::LoginOperations;
     /// Inserts a new master password given a series of prompts and inputs.
     /// The input is a `confirmed_password`, meaning the user must type the same password twice.
     /// The function then hashes the master password and inserts it into the SQLite table `PasswordInfo`.
@@ -222,22 +310,6 @@ pub mod util {
         Ok(master)
     }
 
-    /// Prompts the user for a confirmed password, meaning that they must type the same password twice.
-    pub fn confirmed_password() -> Result<String, io::Error> {
-        let new_password: String = password("Enter new password").mask('*').interact()?;
-        let confirm: String = password("Confirm new password")
-            .mask('*')
-            .validate(move |pass: &String| {
-                if pass != &new_password {
-                    Err("Passwords must match")
-                } else {
-                    Ok(())
-                }
-            })
-            .interact()?;
-        Ok(confirm)
-    }
-
     pub fn prompt_field(
         connection: &Connection,
         master: &str,
@@ -275,68 +347,6 @@ pub mod util {
             )?;
         }
         Ok(())
-    }
-
-    /// Prompts a series of inputs to generate a password.
-    ///  A user may either automatically generate a password or manually type one, or not insert a password at all.
-    ///
-    pub fn prompt_password(
-        connection: &Connection,
-        name: &str,
-        master: &str,
-    ) -> anyhow::Result<()> {
-        let password_type: PasswordGeneration =
-            select("Select password generation type (optional)")
-                .item(
-                    PasswordGeneration::Automatic,
-                    "Generate a password for me",
-                    "secure & recommended",
-                )
-                .item(
-                    PasswordGeneration::Manual,
-                    "I'll type one myself",
-                    "not as secure",
-                )
-                .item(
-                    PasswordGeneration::NoPassword,
-                    "I don't want to save a password",
-                    "",
-                )
-                .interact()?;
-        let password: Option<String> = match password_type {
-            PasswordGeneration::Automatic => Some(prompt_automatic()?),
-            PasswordGeneration::Manual => Some(confirmed_password()?),
-            PasswordGeneration::NoPassword => None,
-        };
-
-        password.map(|password| {
-            insert_data(
-                &connection,
-                &name,
-                &master,
-                PasswordField::Password,
-                &password,
-            )
-        });
-        Ok(())
-    }
-
-    pub fn prompt_automatic() -> Result<String, io::Error> {
-        let length: String = input("Enter password length")
-            .default_input("12")
-            .placeholder("Your password length")
-            .validate(|input: &String| {
-                let num = input.parse::<i32>();
-
-                if num.is_err() {
-                    Err("Please enter a number.")
-                } else {
-                    Ok(())
-                }
-            })
-            .interact()?;
-        let num = length.parse::<usize>().unwrap();
-        Ok(generate_password(num))
     }
     /// Prints a `cliclack::note()` containing the individual fields of password data, i.e. an instance of `PasswordInfo`.
     /// If no data is found, a specific message will be printed.
