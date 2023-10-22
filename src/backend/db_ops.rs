@@ -66,7 +66,6 @@ pub mod crud {
             field
                 .map(|data| {
                     let decoded_data = hex::decode(data)?;
-                    if decoded_data.len() < 12 {}
                     let nonce = decoded_data
                         .get(..12)
                         .ok_or_else(|| BackendError::NoMatchingNonce)?;
@@ -191,7 +190,15 @@ pub mod util {
             (),
         )
     }
-
+    pub fn get_names(connection: &Connection) -> Result<Vec<String>, rusqlite::Error> {
+        let mut stmt = connection.prepare("select name from PasswordInfo")?;
+        let mut names: Vec<String> = Vec::new();
+        let result = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for r in result {
+            names.push(r?);
+        }
+        Ok(names)
+    }
     /// Check if a password exists. May fail with `rusqlite::Error`.
     /// Checks if an `optional()` query `is_some()`, i.e. returns `false` if `None`.
     /// ///  # Arguments
@@ -388,5 +395,34 @@ mod tests {
             !super::util::authenticate(&connection, "random_guess", PasswordField::Password)
                 .unwrap()
         );
+    }
+    #[test]
+    fn test_names() {
+        let connection = Connection::open_in_memory().unwrap();
+        super::util::create_table(&connection).unwrap();
+
+        let master = "mymasterpassword";
+        let name = "test";
+        let second_name = "test2";
+
+        super::crud::insert_data(
+            &connection,
+            name,
+            master,
+            PasswordField::Password,
+            "coolpassword",
+        )
+        .unwrap();
+        super::crud::insert_data(
+            &connection,
+            second_name,
+            master,
+            PasswordField::Password,
+            "coolpassword2",
+        )
+        .unwrap();
+
+        let res = super::util::get_names(&connection).unwrap();
+        assert_eq!(res, [name, second_name]);
     }
 }
