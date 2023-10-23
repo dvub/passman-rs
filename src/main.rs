@@ -6,14 +6,14 @@ use args::{PasswordCommands, PasswordTypes, PwdArgs};
 use backend::{
     crypto::generate_password,
     db_ops::{
-        crud::insert_data,
+        crud::{insert_data, read_password},
         util::{create_table, establish_connection},
     },
     error::BackendError,
     password::PasswordField,
 };
 use clap::Parser;
-use cli::interactive;
+use cli::{interactive, util::print_password_info};
 
 // todo
 // [x] refactor monolith frontend
@@ -52,24 +52,28 @@ fn main() -> anyhow::Result<()> {
                 PasswordTypes::Manual { password } => password,
                 PasswordTypes::Auto { length } => generate_password(length),
             });
-            let fields = [email, username, notes, password]
+            [email, username, notes, password]
                 .iter()
                 .enumerate()
                 .for_each(|(index, field)| {
-                    if field.is_some() {
+                    if let Some(data) = field {
                         let column_name = match index {
                             0 => PasswordField::Email,
                             1 => PasswordField::Username,
                             2 => PasswordField::Notes,
                             3 => PasswordField::Password,
-                            _ => PasswordField::Email,
+                            _ => {}
                         };
-                        let data = field.unwrap();
-                        insert_data(&connection, &name, &master, column_name, &data);
+                        let _ = insert_data(&connection, &name, &master, column_name, data);
                     }
                 });
         }
-        PasswordCommands::Get { name } => {}
+        PasswordCommands::Get { name } => {
+            let password = read_password(&connection, &name, &master)?;
+            if let Some(p) = password {
+                print_password_info(p);
+            }
+        }
         PasswordCommands::Update {
             name,
             new_name,
