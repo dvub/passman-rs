@@ -9,11 +9,11 @@ use backend::{
         crud::{insert_data, read_password},
         util::{create_table, establish_connection},
     },
-    error::BackendError,
     password::PasswordField,
 };
 use clap::Parser;
 use cli::{interactive, util::print_password_info};
+use cliclack::note;
 
 // todo
 // [x] refactor monolith frontend
@@ -52,26 +52,26 @@ fn main() -> anyhow::Result<()> {
                 PasswordTypes::Manual { password } => password,
                 PasswordTypes::Auto { length } => generate_password(length),
             });
-            [email, username, notes, password]
-                .iter()
-                .enumerate()
-                .for_each(|(index, field)| {
-                    if let Some(data) = field {
-                        let column_name = match index {
-                            0 => PasswordField::Email,
-                            1 => PasswordField::Username,
-                            2 => PasswordField::Notes,
-                            3 => PasswordField::Password,
-                            _ => {}
-                        };
-                        let _ = insert_data(&connection, &name, &master, column_name, data);
-                    }
-                });
+
+            if let Some(data) = email {
+                insert_data(&connection, &name, &master, PasswordField::Email, &data)?;
+            }
+            if let Some(data) = username {
+                insert_data(&connection, &name, &master, PasswordField::Username, &data)?;
+            }
+            if let Some(data) = notes {
+                insert_data(&connection, &name, &master, PasswordField::Notes, &data)?;
+            }
+            if let Some(data) = password {
+                insert_data(&connection, &name, &master, PasswordField::Password, &data)?;
+            }
         }
         PasswordCommands::Get { name } => {
             let password = read_password(&connection, &name, &master)?;
             if let Some(p) = password {
                 print_password_info(p);
+            } else {
+                note("Password Info", "No password found")?;
             }
         }
         PasswordCommands::Update {
