@@ -52,27 +52,11 @@ fn main() -> anyhow::Result<()> {
                 PasswordTypes::Manual { password } => password,
                 PasswordTypes::Auto { length } => generate_password(length),
             });
-
-            if let Some(data) = email {
-                insert_data(&connection, &name, &master, PasswordField::Email, &data)?;
-            }
-            if let Some(data) = username {
-                insert_data(&connection, &name, &master, PasswordField::Username, &data)?;
-            }
-            if let Some(data) = notes {
-                insert_data(&connection, &name, &master, PasswordField::Notes, &data)?;
-            }
-            if let Some(data) = password {
-                insert_data(&connection, &name, &master, PasswordField::Password, &data)?;
-            }
+        
         }
         PasswordCommands::Get { name } => {
             let password = read_password(&connection, &name, &master)?;
-            if let Some(p) = password {
-                print_password_info(p);
-            } else {
-                note("Password Info", "No password found")?;
-            }
+            print_password_info(password)?;
         }
         PasswordCommands::Update {
             name,
@@ -81,7 +65,9 @@ fn main() -> anyhow::Result<()> {
             username,
             notes,
             password_type,
-        } => {}
+        } => {
+            
+        }
         PasswordCommands::List => {}
         PasswordCommands::Delete { name, confirm } => {}
     }

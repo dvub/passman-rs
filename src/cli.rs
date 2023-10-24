@@ -66,17 +66,15 @@ pub fn interactive(connection: &Connection) -> anyhow::Result<()> {
 
 // these are the CLI frontend implementations of the CRUD operations
 pub mod crud {
-    use crate::backend::{
-        db_ops::{
+    use crate::backend::db_ops::{
             crud::{delete_password, read_password},
             util::check_password_exists,
-        },
-        password::{PasswordField, PasswordInfo},
-    };
+        };
+
     use cliclack::{confirm, input, note, outro};
     use colored::Colorize;
     use rusqlite::Connection;
-
+    use crate::backend::password::PasswordField;
     use super::util::{
         check_password_availability, password::prompt_password, print_password_info, prompt_field,
     };
@@ -124,11 +122,7 @@ pub mod crud {
             .required(true)
             .interact()?;
         let res = read_password(connection, &name, master)?;
-        let str = res.map_or_else(
-            || String::from("No password was found with that name."),
-            |password_info: PasswordInfo| print_password_info(password_info),
-        );
-        note("Password Info", str)?;
+        print_password_info(res)?;
         outro("Exiting...".bold())?;
         Ok(())
     }
@@ -397,14 +391,15 @@ pub mod util {
     }
     /// Prints a `cliclack::note()` containing the individual fields of password data, i.e. an instance of `PasswordInfo`.
     /// If no data is found, a specific message will be printed.
-    pub fn print_password_info(password_info: PasswordInfo) -> String {
-        let fields = [
-            password_info.email,
-            password_info.username,
-            password_info.password,
-            password_info.notes,
-        ];
-        fields
+    pub fn print_password_info(password_info: Option<PasswordInfo>) -> anyhow::Result<()> {
+        let str = password_info.map_or_else(|| String::from("No password was found."), |password_info: PasswordInfo| -> String {
+            let fields = [
+                password_info.email,
+                password_info.username,
+                password_info.password,
+                password_info.notes,
+            ];
+            fields
             .iter()
             .enumerate()
             .map(|(index, field)| {
@@ -422,5 +417,10 @@ pub mod util {
             })
             .collect::<Vec<String>>()
             .join("\n")
+            
+        });
+        
+        note("Password Info", str)?;
+        Ok(())
     }
 }
