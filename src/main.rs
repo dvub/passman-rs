@@ -5,30 +5,23 @@ use cliclack::{intro, outro, select};
 use colored::Colorize;
 
 use backend::db_ops::{
-    util::{check_password_exists, create_table, establish_connection},
+    util::{check_password_info_exists, create_table, establish_connection},
     *,
 };
 use cli::{
-    crud::{delete, insert, read},
-    util::{insert_master, login},
+    crud_operations::{delete, insert, read},
+    utility::{insert_new_master_info, login},
     Operation,
 };
-
-// todo
-// [x] refactor monolith frontend
-// [~] add nice colors to frontend
-
-// SPEED
-// benchmarking
-
+// very simple main program, lo
 fn main() -> anyhow::Result<()> {
     let connection = establish_connection()?;
     create_table(&connection)?;
 
     intro("passman.rs")?;
 
-    if !check_password_exists(&connection, MASTER_KEYWORD)? {
-        insert_master(&connection)?;
+    if !check_password_info_exists(&connection, MASTER_KEYWORD)? {
+        insert_new_master_info(&connection)?;
         return Ok(());
     }
     let master = login(&connection)?;
@@ -46,6 +39,5 @@ fn main() -> anyhow::Result<()> {
         Operation::Delete => delete(&connection)?,
         Operation::Exit => outro("Exiting...".green().bold())?,
     }
-
     Ok(())
 }

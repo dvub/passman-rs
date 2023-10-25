@@ -1,3 +1,6 @@
+// note: i tested the frontend by hand because i wanted to see what things looked like
+// not to mention that it also would be hard to test this frontend because of the cliclack crate
+
 // simple and probably unnecessary enums for control flow in the main application
 
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -24,20 +27,21 @@ pub enum LoginOperations {
     Exit,
 }
 // these are the CLI frontend implementations of the CRUD operations
-pub mod crud {
+pub mod crud_operations {
     use crate::backend::{
         db_ops::{
-            crud::{delete_password, read_password},
-            util::check_password_exists,
+            crud::{delete_password_info, read_password_info},
+            util::check_password_info_exists,
         },
-        password::{PasswordField, PasswordInfo},
+        password::PasswordField,
     };
     use cliclack::{confirm, input, note, outro};
     use colored::Colorize;
     use rusqlite::Connection;
 
-    use super::util::{
-        check_password_availability, password::prompt_password, print_password_info, prompt_field,
+    use super::utility::{
+        check_password_availability, password::insert_password_info, print_password_info,
+        prompt_field,
     };
     /// Series of prompts to insert a new password into the SQLite table `PasswordInfo`.
     pub fn insert(connection: &Connection, master: &str) -> anyhow::Result<()> {
@@ -45,29 +49,34 @@ pub mod crud {
             .placeholder("My new password")
             .required(true)
             .interact()?;
+
         check_password_availability(connection, &name)?;
+
         prompt_field(
-            &connection,
-            &master,
+            connection,
+            master,
             &name,
             PasswordField::Email,
             "example@domain.com",
         )?;
+
         prompt_field(
-            &connection,
-            &master,
+            connection,
+            master,
             &name,
             PasswordField::Username,
             "example_username",
         )?;
+
         prompt_field(
-            &connection,
-            &master,
+            connection,
+            master,
             &name,
             PasswordField::Notes,
             "any text here",
         )?;
-        prompt_password(connection, &name, &master)?;
+
+        insert_password_info(connection, &name, master)?;
 
         outro(format!(
             "Successfully inserted a new password!\n\t{}",
@@ -82,12 +91,8 @@ pub mod crud {
             .placeholder("My new password")
             .required(true)
             .interact()?;
-        let res = read_password(&connection, &name, &master)?;
-        let str = res.map_or_else(
-            || String::from("No password was found with that name."),
-            |password_info: PasswordInfo| print_password_info(password_info),
-        );
-        note("Password Info", str)?;
+        let res = read_password_info(connection, &name, master)?;
+        print_password_info(res)?;
         outro("Exiting...".bold())?;
         Ok(())
     }
@@ -98,7 +103,7 @@ pub mod crud {
             .required(true)
             .interact()?;
 
-        let check_exists = check_password_exists(&connection, &name)?;
+        let check_exists = check_password_info_exists(connection, &name)?;
         if !check_exists {
             outro("No password found with that name.")?;
             return Ok(());
@@ -117,18 +122,18 @@ pub mod crud {
             return Ok(());
         }
 
-        delete_password(&connection, &name)?;
+        delete_password_info(connection, &name)?;
         outro("Successfully deleted password.".bold())?;
         Ok(())
     }
 }
 
 // all of this is just utility functions and refactoring (and abstracting and the like)
-pub mod util {
+pub mod utility {
     use crate::backend::{
         crypto::hash,
         db_ops::{
-            crud::{get_password, insert_data},
+            crud::{get_password_info, insert_data},
             util::authenticate,
             MASTER_KEYWORD,
         },
@@ -169,7 +174,7 @@ pub mod util {
         /// Prompts a series of inputs to generate a password.
         ///  A user may either automatically generate a password or manually type one, or not insert a password at all.
         ///
-        pub fn prompt_password(
+        pub fn insert_password_info(
             connection: &Connection,
             name: &str,
             master: &str,
@@ -193,24 +198,18 @@ pub mod util {
                     )
                     .interact()?;
             let password: Option<String> = match password_type {
-                PasswordGeneration::Automatic => Some(prompt_automatic()?),
+                PasswordGeneration::Automatic => Some(auto_password_prompt()?),
                 PasswordGeneration::Manual => Some(confirmed_password()?),
                 PasswordGeneration::NoPassword => None,
             };
 
             password.map(|password| {
-                insert_data(
-                    &connection,
-                    &name,
-                    &master,
-                    PasswordField::Password,
-                    &password,
-                )
+                insert_data(connection, name, master, PasswordField::Password, &password)
             });
             Ok(())
         }
 
-        pub fn prompt_automatic() -> Result<String, io::Error> {
+        pub fn auto_password_prompt() -> Result<String, io::Error> {
             let length: String = input("Enter password length")
                 .default_input("12")
                 .placeholder("Your password length")
@@ -234,7 +233,7 @@ pub mod util {
     /// The input is a `confirmed_password`, meaning the user must type the same password twice.
     /// The function then hashes the master password and inserts it into the SQLite table `PasswordInfo`.
     /// On that note, the master password is stored in the same table as all other data, with a special keyword.
-    pub fn insert_master(connection: &Connection) -> anyhow::Result<()> {
+    pub fn insert_new_master_info(connection: &Connection) -> anyhow::Result<()> {
         cliclack::note(
             "No master record found.",
             "You'll be prompted to create a master record by entering a new master password.",
@@ -275,7 +274,7 @@ pub mod util {
                 let master = password(format!("Enter {}", "master password:".bright_red().bold()))
                     .mask('*')
                     .interact()?;
-                if !(authenticate(&connection, &master, PasswordField::Password)?) {
+                if !(authenticate(connection, &master, PasswordField::Password)?) {
                     outro("Incorrect password. Exiting...".red().bold())?;
                     std::process::exit(1);
                 }
@@ -287,7 +286,7 @@ pub mod util {
                     password(format!("Enter {}", "recovery phrase:".bright_red().bold()))
                         .mask('*')
                         .interact()?;
-                if !(authenticate(&connection, &recovery_phrase, PasswordField::Notes)?) {
+                if !(authenticate(connection, &recovery_phrase, PasswordField::Notes)?) {
                     outro("Incorrect recovery phrase. Exiting...".red().bold())?;
                     std::process::exit(1);
                 }
@@ -329,7 +328,7 @@ pub mod util {
     /// Utility function to print the details on the availability/use of a password name when inserting/updating a password.
     /// If a password exists with a given `name`, the user has the option to exit the program and not update the data.
     pub fn check_password_availability(connection: &Connection, name: &str) -> anyhow::Result<()> {
-        if get_password(&connection, &name)?.is_some() {
+        if get_password_info(connection, name)?.is_some() {
             let confirm =
                 confirm("A password already exists with this name. Would you like to update it?")
                     .interact()?;
@@ -350,30 +349,40 @@ pub mod util {
     }
     /// Prints a `cliclack::note()` containing the individual fields of password data, i.e. an instance of `PasswordInfo`.
     /// If no data is found, a specific message will be printed.
-    pub fn print_password_info(password_info: PasswordInfo) -> String {
-        let fields = [
-            password_info.email,
-            password_info.username,
-            password_info.password,
-            password_info.notes,
-        ];
-        fields
-            .iter()
-            .enumerate()
-            .map(|(index, field)| {
-                let field_name = match index {
-                    0 => "email",
-                    1 => "username",
-                    2 => "password",
-                    3 => "notes",
-                    _ => "",
-                };
-                field.as_ref().map_or_else(
-                    || format!("No data found for {}", field_name),
-                    |f| format!("{}: {}", field_name, f),
-                )
-            })
-            .collect::<Vec<String>>()
-            .join("\n")
+    pub fn print_password_info(password_info: Option<PasswordInfo>) -> anyhow::Result<()> {
+        password_info.map_or_else(
+            || -> anyhow::Result<()> {
+                Ok(note("Password Info", "No password found with that name.")?)
+            },
+            |password_info| -> anyhow::Result<()> {
+                let fields = [
+                    password_info.email,
+                    password_info.username,
+                    password_info.password,
+                    password_info.notes,
+                ];
+                let str = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(index, field)| {
+                        // we need to match the index to a field so we can print more data
+                        let field_name = match index {
+                            0 => "email",
+                            1 => "username",
+                            2 => "password",
+                            3 => "notes",
+                            _ => "",
+                        };
+                        // we'll return a string, and print a specific message if nothing is found in a certain field
+                        field.as_ref().map_or_else(
+                            || format!("No data found for {}", field_name),
+                            |f| format!("{}: {}", field_name, f),
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                Ok(note("Password Info", str)?)
+            },
+        )
     }
 }

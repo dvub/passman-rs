@@ -18,7 +18,7 @@ pub mod crud {
     /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
     /// - `search_term` - a string slice that holds the name of the password to search for.
     ///
-    pub fn get_password(
+    pub fn get_password_info(
         connection: &Connection,
         search_term: &str,
     ) -> Result<Option<PasswordInfo>, rusqlite::Error> {
@@ -45,7 +45,7 @@ pub mod crud {
     /// - `password` - A `Password` with encrypted fields.
     /// - `master` - a string slice that holds the master password. The master password should be verified/authenticated by the time this function is called.
     ///
-    fn decrypt_password(
+    fn decrypt_password_info(
         password: PasswordInfo,
         master: &str,
     ) -> Result<PasswordInfo, BackendError> {
@@ -66,7 +66,6 @@ pub mod crud {
             field
                 .map(|data| {
                     let decoded_data = hex::decode(data)?;
-                    if decoded_data.len() < 12 {}
                     let nonce = decoded_data
                         .get(..12)
                         .ok_or_else(|| BackendError::NoMatchingNonce)?;
@@ -102,14 +101,14 @@ pub mod crud {
     /// - `search_term` - a string slice that holds the name of the password to search for.
     /// - `master` - a string slice holding the master password. The master password should be verified/authenticated by the time this function is called.
     ///
-    pub fn read_password(
+    pub fn read_password_info(
         connection: &Connection,
         search_term: &str,
         master: &str,
     ) -> std::result::Result<std::option::Option<PasswordInfo>, BackendError> {
         // interestingly this function is just a combination of 2 other functions..
-        get_password(connection, search_term)?
-            .map(|encrypted| decrypt_password(encrypted, master))
+        get_password_info(connection, search_term)?
+            .map(|encrypted| decrypt_password_info(encrypted, master))
             .transpose()
     }
     /// Encrypts and inserts a field into the SQLite table `PasswordInfo`.
@@ -159,7 +158,7 @@ pub mod crud {
     /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
     /// - `password_name` - a string slice that holds the name of the password to insert or update into.
     ///
-    pub fn delete_password(
+    pub fn delete_password_info(
         connection: &Connection,
         password_name: &str,
     ) -> Result<usize, rusqlite::Error> {
@@ -171,7 +170,7 @@ pub mod util {
 
     use rusqlite::{Connection, OptionalExtension};
 
-    use super::{crud::get_password, MASTER_KEYWORD};
+    use super::{crud::get_password_info, MASTER_KEYWORD};
     /// Establishes a connection to the SQLite database
     pub fn establish_connection() -> Result<rusqlite::Connection, rusqlite::Error> {
         Connection::open("./data.db")
@@ -199,7 +198,7 @@ pub mod util {
     /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
     /// - `password_name` - a string slice that holds the name of the password to insert or update into.
     ///
-    pub fn check_password_exists(
+    pub fn check_password_info_exists(
         connection: &Connection,
         password_name: &str,
     ) -> Result<bool, rusqlite::Error> {
@@ -223,7 +222,7 @@ pub mod util {
         column: PasswordField,
     ) -> Result<bool, BackendError> {
         // unwrapping values because these values MUST exist at this point in the application
-        let master_record = get_password(connection, MASTER_KEYWORD)?.unwrap();
+        let master_record = get_password_info(connection, MASTER_KEYWORD)?.unwrap();
         let data = match column {
             PasswordField::Password => Ok(master_record.password.unwrap()),
             PasswordField::Notes => Ok(master_record.notes.unwrap()),
@@ -298,7 +297,7 @@ mod tests {
             .unwrap();
         assert_eq!(insert, 1);
 
-        let res = super::crud::read_password(&connection, name, master).unwrap();
+        let res = super::crud::read_password_info(&connection, name, master).unwrap();
 
         assert_eq!(
             res.expect("no password found")
@@ -319,7 +318,7 @@ mod tests {
         super::crud::insert_data(&connection, name, master, PasswordField::Password, password)
             .unwrap();
 
-        let r = super::crud::read_password(&connection, name, master)
+        let r = super::crud::read_password_info(&connection, name, master)
             .unwrap()
             .unwrap();
         assert_eq!(r.password.unwrap(), password);
@@ -336,8 +335,8 @@ mod tests {
         super::crud::insert_data(&connection, name, master, PasswordField::Password, password)
             .unwrap();
 
-        super::crud::delete_password(&connection, name).unwrap();
-        let result = super::crud::read_password(&connection, name, master).unwrap();
+        super::crud::delete_password_info(&connection, name).unwrap();
+        let result = super::crud::read_password_info(&connection, name, master).unwrap();
         assert!(result.is_none())
     }
     #[test]
@@ -347,7 +346,7 @@ mod tests {
         let master = "masterpassword";
         let name = "test";
         // first, make sure the function returns false if no data exists
-        assert!(!super::util::check_password_exists(&connection, name).unwrap());
+        assert!(!super::util::check_password_info_exists(&connection, name).unwrap());
         // now lets insert some data
         super::crud::insert_data(
             &connection,
@@ -358,7 +357,7 @@ mod tests {
         )
         .unwrap();
         // finally, we'll check one more time to make sure it's returning true since we added data
-        assert!(super::util::check_password_exists(&connection, name).unwrap());
+        assert!(super::util::check_password_info_exists(&connection, name).unwrap());
     }
     #[test]
     fn authenticate() {
