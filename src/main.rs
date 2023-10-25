@@ -1,25 +1,22 @@
-mod args;
 mod backend;
 mod cli;
 
-use args::{PasswordCommands, PasswordTypes, PwdArgs};
-use backend::{
-    crypto::generate_password,
-    db_ops::{
-        crud::{insert_data, read_password},
-        util::{create_table, establish_connection},
-    },
-    password::PasswordField,
+use cliclack::{intro, outro, select};
+use colored::Colorize;
+
+use backend::db_ops::{
+    util::{check_password_exists, create_table, establish_connection},
+    *,
 };
-use clap::Parser;
-use cli::{interactive, util::print_password_info};
-use cliclack::note;
+use cli::{
+    crud::{delete, insert, read},
+    util::{insert_master, login},
+    Operation,
+};
 
 // todo
 // [x] refactor monolith frontend
 // [~] add nice colors to frontend
-
-// add clap support
 
 // SPEED
 // benchmarking
@@ -28,48 +25,26 @@ fn main() -> anyhow::Result<()> {
     let connection = establish_connection()?;
     create_table(&connection)?;
 
-    let args = PwdArgs::parse();
-    if args.interactive {
-        interactive(&connection)?;
-        return Ok(());
-    }
-    if args.command.is_none() {
-        println!("No command was supplied. Use -h or --help for more information.");
-        return Ok(());
-    }
+    intro("passman.rs")?;
 
-    let command = args.command.unwrap();
-    let master = args.master_password.unwrap();
-    match command {
-        PasswordCommands::Add {
-            name,
-            email,
-            username,
-            notes,
-            password_type,
-        } => {
-            let password = password_type.map(|t| match t {
-                PasswordTypes::Manual { password } => password,
-                PasswordTypes::Auto { length } => generate_password(length),
-            });
-        
-        }
-        PasswordCommands::Get { name } => {
-            let password = read_password(&connection, &name, &master)?;
-            print_password_info(password)?;
-        }
-        PasswordCommands::Update {
-            name,
-            new_name,
-            email,
-            username,
-            notes,
-            password_type,
-        } => {
-            
-        }
-        PasswordCommands::List => {}
-        PasswordCommands::Delete { name, confirm } => {}
+    if !check_password_exists(&connection, MASTER_KEYWORD)? {
+        insert_master(&connection)?;
+        return Ok(());
+    }
+    let master = login(&connection)?;
+
+    let operation = select("What would you like to do?")
+        .item(Operation::Insert, "Insert or Update a password", "")
+        .item(Operation::Read, "Get a password", "")
+        .item(Operation::Delete, "Delete a password", "dangerous")
+        .item(Operation::Exit, "Exit", "")
+        .interact()?;
+
+    match operation {
+        Operation::Insert => insert(&connection, &master)?,
+        Operation::Read => read(&connection, &master)?,
+        Operation::Delete => delete(&connection)?,
+        Operation::Exit => outro("Exiting...".green().bold())?,
     }
 
     Ok(())
