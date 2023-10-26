@@ -34,9 +34,12 @@ fn main() -> anyhow::Result<()> {
         .interact()?;
 
     match operation {
-        Operation::Insert => insert(&connection, &master)?,
-        Operation::Read => read(&connection, &master)?,
-        Operation::Delete => delete(&connection)?,
+        Operation::Insert => insert(&connection, &master)
+            .unwrap_or_else(|f| eprintln!("There was an error updating the database:\n{}", f)),
+        Operation::Read => read(&connection, &master)
+            .unwrap_or_else(|f| eprintln!("There was an error reading the password:\n{}", f)),
+        Operation::Delete => delete(&connection)
+            .unwrap_or_else(|f| eprintln!("There was an error deleting the password:\n{}", f)),
         Operation::Exit => outro("Exiting...".green().bold())?,
     }
     Ok(())
