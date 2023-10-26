@@ -1,5 +1,5 @@
 [package]
-name = "passmanrsim"
+name = "passman-rs"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,7 +19,6 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 
 
-
 # error handling and propagation
 
 anyhow = "1.0"
@@ -30,6 +29,5 @@ thiserror = "1.0"
 rusqlite = { version = "0.29.0", features = ["bundled"] }
 
 # CLI frontend
-
 cliclack = "0.1.9"
 colored = "2.0.4"

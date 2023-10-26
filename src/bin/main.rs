@@ -1,5 +1,4 @@
-mod backend;
-mod cli;
+use passman_rs::{backend, cli};
 
 use cliclack::{intro, outro, select};
 use colored::Colorize;
