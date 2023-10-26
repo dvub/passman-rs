@@ -13,9 +13,10 @@ use cli::{
     utility::{insert_new_master_info, login},
     Operation,
 };
-// very simple main program, lo
+// very simple main program, yay!
 fn main() -> anyhow::Result<()> {
     let connection = establish_connection()?;
+
     create_table(&connection)?;
 
     intro("passman.rs")?;
@@ -24,6 +25,7 @@ fn main() -> anyhow::Result<()> {
         insert_new_master_info(&connection)?;
         return Ok(());
     }
+
     let master = login(&connection)?;
 
     let operation = select("What would you like to do?")

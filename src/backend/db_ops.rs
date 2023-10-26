@@ -175,6 +175,8 @@ pub mod util {
     pub fn establish_connection() -> Result<rusqlite::Connection, rusqlite::Error> {
         Connection::open("./data.db")
     }
+    // I've considered using format!() here to make sure the struct name/fields match this statement
+    // (and potentially other SQLite statement strings), but I think that may just be overengineering.
 
     /// Creates the SQLite table equivelant of the `Password` struct.
     pub fn create_table(connection: &Connection) -> Result<usize, rusqlite::Error> {
@@ -193,7 +195,7 @@ pub mod util {
 
     /// Check if a password exists. May fail with `rusqlite::Error`.
     /// Checks if an `optional()` query `is_some()`, i.e. returns `false` if `None`.
-    /// ///  # Arguments
+    /// # Arguments
     ///
     /// - `connection` - a reference to a `rusqlite::Connection`, which may be to a file or in memory.
     /// - `password_name` - a string slice that holds the name of the password to insert or update into.

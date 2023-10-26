@@ -40,8 +40,7 @@ pub mod crud_operations {
     use rusqlite::Connection;
 
     use super::utility::{
-        check_password_availability, password::insert_password_info, print_password_info,
-        prompt_field,
+        check_password_availability, password::insert_password, print_password_info, prompt_field,
     };
     /// Series of prompts to insert a new password into the SQLite table `PasswordInfo`.
     pub fn insert(connection: &Connection, master: &str) -> anyhow::Result<()> {
@@ -76,7 +75,7 @@ pub mod crud_operations {
             "any text here",
         )?;
 
-        insert_password_info(connection, &name, master)?;
+        insert_password(connection, &name, master)?;
 
         outro(format!(
             "Successfully inserted a new password!\n\t{}",
@@ -173,8 +172,8 @@ pub mod utility {
 
         /// Prompts a series of inputs to generate a password.
         ///  A user may either automatically generate a password or manually type one, or not insert a password at all.
-        ///
-        pub fn insert_password_info(
+        /// This function inserts a password! As such, it returns ().
+        pub fn insert_password(
             connection: &Connection,
             name: &str,
             master: &str,
@@ -257,7 +256,15 @@ pub mod utility {
 
         Ok(())
     }
+    // small note: the exit part may not be necessary because the user can just interrupt.
 
+    /// Utility function for the initial login prompts. Provides the user the ability to:
+    ///
+    /// 1. Log in using a master password
+    /// 2. Reset a lost/forgotten master password with a recovery phrase (stored as hashed data in notes column)
+    /// 3. Exit the program immediately.  
+    ///
+    /// Returns a master password string for the logic in the program.
     pub fn login(connection: &Connection) -> anyhow::Result<String> {
         let login_operation: LoginOperations = select("Select a login option.")
             .item(LoginOperations::Login, "Log in", "")
@@ -333,6 +340,8 @@ pub mod utility {
                 confirm("A password already exists with this name. Would you like to update it?")
                     .interact()?;
             if !confirm {
+                // this *should* end the program.
+                outro("Exiting...".green().bold())?;
                 return Ok(());
             }
             note(
@@ -347,6 +356,8 @@ pub mod utility {
         }
         Ok(())
     }
+    // the number of indents on this function scares me.
+
     /// Prints a `cliclack::note()` containing the individual fields of password data, i.e. an instance of `PasswordInfo`.
     /// If no data is found, a specific message will be printed.
     pub fn print_password_info(password_info: Option<PasswordInfo>) -> anyhow::Result<()> {
@@ -355,6 +366,8 @@ pub mod utility {
                 Ok(note("Password Info", "No password found with that name.")?)
             },
             |password_info| -> anyhow::Result<()> {
+                // iterating over the important fields. it might be better to refactor this to uh.
+                // NOT use iteration; it could be simpler to just concatenate a string for each field manually.
                 let fields = [
                     password_info.email,
                     password_info.username,
