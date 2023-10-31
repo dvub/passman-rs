@@ -15,7 +15,9 @@ use cli::{
 };
 
 // TODO:
-// implement bcrypt or argon or some shit for hashing, beccause youre fuckin stupid for using sha
+// implement sodium oxide for argon and better aes(?)
+// understand public vs secret key cryptography
+
 // implement zeroize because uh .. safety... or something
 // add logic for changing master password
 // refactor project structure - simplify, because you overdid it
