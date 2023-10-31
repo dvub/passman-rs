@@ -4,11 +4,11 @@ use aes_gcm::{
     Aes256Gcm, AesGcm, Key, KeyInit,
 };
 
-use argon2::Config;
 use pbkdf2::pbkdf2_hmac;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use typenum::consts::{U12, U32};
+use sodiumoxide::crypto::pwhash::{pwhash, OpsLimit};
 
 use crate::backend::error::BackendError;
 
@@ -22,11 +22,8 @@ pub fn hash(text: &[u8]) -> GenericArray<u8, U32> {
     hasher.update(text);
     hasher.finalize()
 }
-
-pub fn argon_hash(data: &[u8]) {
-    let config = Config::default();
-    let salt = b"tf?"; // where does the salt come from?
-    let result = argon2::hash_encoded(data, salt, &config)?;
+pub fn hash2(data: &[u8]) {
+    pwhash(data, OpsLimit());
 }
 
 /// Derives an encryption key from a password with the ppbkdf2 algorithm.

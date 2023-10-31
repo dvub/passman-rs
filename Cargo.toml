@@ -10,11 +10,12 @@ edition = "2021"
 # crypto dependencies
 
 sha2 = "0.10.7"
-rust-argon2 = "2.0"
 aes-gcm = "0.10.3"
 pbkdf2 = "0.12.2"
 rand = "0.8.5"
 typenum = "1.17.0"
+
+sodiumoxide = "0.2.7"
 
 hex = "0.4.3"
 hex-literal = "0.4.1"
